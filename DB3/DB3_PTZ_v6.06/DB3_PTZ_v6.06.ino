@@ -66,6 +66,11 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <HardwareSerial.h>
+#include "Logger.h"
+
+// Create Logger instance with 10 lines (default)
+Logger logger;
+
 HardwareSerial UARTport(2); // use UART2 for VISCA comumication
 
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
@@ -880,7 +885,7 @@ void TCA9548A(uint8_t bus) {
   Wire.beginTransmission(0x70);  // TCA9548A address
   Wire.write(1 << bus);          // send byte to select bus
   Wire.endTransmission();
-  //Serial.print(bus);
+  //logger.print(bus);
 }
 
 
@@ -888,6 +893,8 @@ void TCA9548A(uint8_t bus) {
 
 
 void setup() {
+  logger.begin();
+  logger.print("Logger initialized");
 
   //Setup for Tally LED
   FastLED.addLeds<WS2812B, DATA_PIN, GRB>(leds, NUM_LEDS);
@@ -897,7 +904,7 @@ void setup() {
   TCA9548A(4);
   // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Address 0x3D for 128x64
-    Serial.println(F("SSD1306 allocation failed"));
+    logger.println(F("SSD1306 allocation failed"));
     for (;;); // Don't proceed, loop forever
   }
   display.clearDisplay();
@@ -932,26 +939,24 @@ void setup() {
     stepper4->setAutoEnable(false);
   }
 
-  Serial.begin(115200);
-  //  Serial2.begin(115200, SERIAL_8N1, RXD2, TXD2);
   Wire.begin();
-  Serial.println("\nRunning DigitalBird DB3 Pan Tilt Head software version 1.0\n");
+  logger.println("\nRunning DigitalBird DB3 Pan Tilt Head software version 1.0\n");
   UARTport.begin(9600, SERIAL_8N1, 16, 17);
 
   //********************Setup Radio ESP-NOW**********************************//
   WiFi.mode(WIFI_STA);
 
-  Serial.println("\nmacAdress is:\n");
-  Serial.print(WiFi.macAddress());
+  logger.println("\nmacAdress is:\n");
+  logger.print(WiFi.macAddress());
   WiFi.disconnect();
 
   //******************Setup ESP_now***************************
   if (esp_now_init() == ESP_OK) {
-    Serial.println("ESPNow Init Sucess");
+    logger.println("ESPNow Init Sucess");
     esp_now_register_recv_cb(receiveCallback);
     esp_now_register_send_cb(sentCallback);
   } else {
-    Serial.println("ESPNow Init Failed");
+    logger.println("ESPNow Init Failed");
     delay(3000);
     ESP.restart();
   }
@@ -979,12 +984,12 @@ void setup() {
   PTZ_ID = SysMemory.getUInt("PTZ_ID", 5);
   SysMemory.end();
   lastPTZ_ID = PTZ_ID;                                          //set last PTZ_ID for comparison when changing ID
-  Serial.printf("PTZ_ID is set to: %d \n", PTZ_ID);
+  logger.printf("PTZ_ID is set to: %d \n", PTZ_ID);
   //saveIP();
   Load_SysMemory();
-  Serial.printf("\ncam_F_Out: %d \n", cam_F_Out);
-  Serial.printf("\ncam_F_In: %d \n", cam_F_In);
-  Serial.printf("IP Adress: %d.%d.%d.%d %d\n", IP1, IP2, IP3, IP4, IPGW, UDP);
+  logger.printf("\ncam_F_Out: %d \n", cam_F_Out);
+  logger.printf("\ncam_F_In: %d \n", cam_F_In);
+  logger.printf("IP Adress: %d.%d.%d.%d %d\n", IP1, IP2, IP3, IP4, IPGW, UDP);
   digitalWrite(StepFOC, LOW);                                   //Power UP the Focus stepper
   checkEncoders();
   homeStepper();
@@ -1056,9 +1061,9 @@ void loop() {
     SetID();
     lastPTZ_ID = PTZ_ID;
   }
-  //Serial.printf("PTZ_CAM is set to: %d \n", PTZ_Cam);
-  //Serial.printf("PTZ_ID is set to: %d \n", PTZ_ID);
-  //Serial.printf("LM is set to: %d \n", LM);
+  //logger.printf("PTZ_CAM is set to: %d \n", PTZ_Cam);
+  //logger.printf("PTZ_ID is set to: %d \n", PTZ_ID);
+  //logger.printf("LM is set to: %d \n", LM);
   //delay(1000);
   if ((PTZ_Cam == PTZ_ID)  && LM == 0) {
     PTZ_Control();
@@ -1424,10 +1429,10 @@ void checkEncoders() {                                              //This funct
   Wire.requestFrom(0x36, 1); //request from the sensor
   if (Wire.available() == 0) {
     FTest = 0;
-    Serial.println("Focus encoder unavailable");
+    logger.println("Focus encoder unavailable");
   } else {
     FTest = 1;
-    Serial.println("Focus encoder found");
+    logger.println("Focus encoder found");
   }
 
 
@@ -1438,10 +1443,10 @@ void checkEncoders() {                                              //This funct
   Wire.requestFrom(0x36, 1); //request from the sensor
   if (Wire.available() == 0) {
     ZTest = 0;
-    Serial.println("Zoom encoder unavailable");
+    logger.println("Zoom encoder unavailable");
   } else {
     ZTest = 1;
-    Serial.println("Zoom encoder found");
+    logger.println("Zoom encoder found");
   }
 }
 
@@ -1491,15 +1496,15 @@ void Start_F_Encoder() {
   }
   F_E_position = F_revolutions * 4096 + F_output;   // calculate the position the the encoder is at based off of the number of revolutions
 
-  //Serial.println("Encoder E_Position=");
-  //Serial.println(E_position);
+  //logger.println("Encoder E_Position=");
+  //logger.println(E_position);
 
   F_lastOutput = F_output;                      // save the last raw value for the next loop
   F_E_outputPos = F_E_position;
 
   F_S_position = ((F_E_position / 2.56));       //Ajust encoder to stepper values the number of steps eqiv
   F_S_position = (F_S_position * 2);            //Ajust encoder to stepper values the number of steps eqiv
-  //Serial.println(F_S_position);
+  //logger.println(F_S_position);
 }
 
 //*****Zoom Encoder
@@ -1528,15 +1533,15 @@ void Start_Z_Encoder() {
   }
   Z_E_position = Z_revolutions * 4096 + Z_output;   // calculate the position the the encoder is at based off of the number of revolutions
 
-  //Serial.println("Encoder E_Position=");
-  //Serial.println(E_position);
+  //logger.println("Encoder E_Position=");
+  //logger.println(E_position);
 
   Z_lastOutput = Z_output;                      // save the last raw value for the next loop
   Z_E_outputPos = Z_E_position;
 
   Z_S_position = ((Z_E_position / 2.56));       //Ajust encoder to stepper values the number of steps eqiv
   Z_S_position = (Z_S_position * 2);            //Ajust encoder to stepper values the number of steps eqiv
-  //Serial.println(Z_S_position);
+  //logger.println(Z_S_position);
 }
 
 
@@ -1566,8 +1571,8 @@ void Start_T_Encoder() {
   }
   T_E_position = T_revolutions * 4096 + T_output;   // calculate the position the the encoder is at based off of the number of revolutions
 
-  //Serial.println("Encoder E_Position=");
-  //Serial.println(E_position);
+  //logger.println("Encoder E_Position=");
+  //logger.println(E_position);
 
   T_lastOutput = T_output;                      // save the last raw value for the next loop
   T_E_outputPos = T_E_position;
@@ -1575,7 +1580,7 @@ void Start_T_Encoder() {
   T_S_position = ((T_E_position / 2.56));       //Ajust encoder to stepper values the number of steps eqiv
 
 
-  //Serial.println(P_S_position);
+  //logger.println(P_S_position);
   T_S_position = (T_S_position * 5.18);            //Ajust for gear ratio 5.18:1 which is to fast for the encoder on the!
   //******This is required if the motor is geared and the encoder is NOT on the back of the motor. (The AS5600 canot keep up with the fast moving motor) *****************
 
@@ -1616,15 +1621,15 @@ void Start_P_Encoder() {
   }
   P_E_position = P_revolutions * 4096 + P_output;   // calculate the position the the encoder is at based off of the number of revolutions
 
-  //Serial.println("Encoder E_Position=");
-  //Serial.println(E_position);
+  //logger.println("Encoder E_Position=");
+  //logger.println(E_position);
 
   P_lastOutput = P_output;                      // save the last raw value for the next loop
   P_E_outputPos = P_E_position;
 
   P_S_position = ((P_E_position / 2.56));       //Ajust encoder to stepper values the number of steps eqiv
   // P_S_position = (P_S_position * 2);            //Ajust encoder to stepper values the number of steps eqiv
-  //Serial.println(P_S_position);
+  //logger.println(P_S_position);
   // if (P_output < 0) {                               //Reverse the values for the encoder position
   //    P_S_position = abs(P_S_position);
   //  } else {
@@ -1717,7 +1722,7 @@ void INpointSet() {
 //*********************************************************OUTpoint set*************************************
 void OUTpointSet() {
 
-  //Serial.printf("entering Outpointset %d \n");
+  //logger.printf("entering Outpointset %d \n");
   delay(10);
   switch (OutP) {
     case 1:                                                           //First Press: Request a new OUTpoint
@@ -1756,7 +1761,7 @@ void OUTpointSet() {
       if (usejoy) {
         PTZ_Control();
       }
-      //Serial.println("leaving out press1");
+      //logger.println("leaving out press1");
       //OutP = 0;
       break;
 
@@ -1780,10 +1785,10 @@ void OUTpointSet() {
       SysMemory.putUInt("FOCout_position", FOCout_position);
       SysMemory.putUInt("ZMout_position", ZMout_position);
       SysMemory.end();
-      Serial.print("New Zoom Out= ");
-      Serial.println(ZMout_position);
-      //Serial.print("New Tilt IN= ");
-      //Serial.println(TLTin_position);
+      logger.print("New Zoom Out= ");
+      logger.println(ZMout_position);
+      //logger.print("New Tilt IN= ");
+      //logger.println(TLTin_position);
       Start_1();                                                      //Send the stepper back to In position
       delay(10);
       //SendNextionValues();                                          //Update nextion with new inpoint values
@@ -2844,7 +2849,7 @@ void receiveCallback(const uint8_t *macAddr, const uint8_t *incomingData,  int L
     IPGW = int(incomingValues.IPGW);
     UDP = int(incomingValues.UDP);
     saveIP();
-    Serial.printf("IP Adress: %d.%d.%d.%d %d\n", IP1, IP2, IP3, IP4, IPGW, UDP);
+    logger.printf("IP Adress: %d.%d.%d.%d %d\n", IP1, IP2, IP3, IP4, IPGW, UDP);
 
     IPR = 0;                                     //Set IPR back to 0
   }
@@ -2856,7 +2861,7 @@ void receiveCallback(const uint8_t *macAddr, const uint8_t *incomingData,  int L
   char macStr[18];
   formatMacAddress(macAddr, macStr, 18);
   // debug log the message to the serial port
-  //Serial.printf("Received message from: %s - %s\n", macStr, buffer);
+  //logger.printf("Received message from: %s - %s\n", macStr, buffer);
   return;
 }
 
@@ -2864,10 +2869,10 @@ void sentCallback(const uint8_t *macAddr, esp_now_send_status_t status) // callb
 {
   char macStr[18];
   formatMacAddress(macAddr, macStr, 18);
-  // Serial.print("Last Packet Sent to: ");
-  // Serial.println(macStr);
-  // Serial.print("Last Packet Send Status: ");
-  // Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
+  // logger.print("Last Packet Sent to: ");
+  // logger.println(macStr);
+  // logger.print("Last Packet Send Status: ");
+  // logger.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
 }
 
 //Setup ESP_NOW connection
@@ -2894,31 +2899,31 @@ void broadcast(const String & message)
     esp_err_t result = esp_now_send(peerAddress, (const uint8_t *)message.c_str(), message.length());*/
   if (result == ESP_OK)
   {
-    //Serial.println("Broadcast message success");
+    //logger.println("Broadcast message success");
   }
   else if (result == ESP_ERR_ESPNOW_NOT_INIT)
   {
-    //Serial.println("ESPNOW not Init.");
+    //logger.println("ESPNOW not Init.");
   }
   else if (result == ESP_ERR_ESPNOW_ARG)
   {
-    //Serial.println("Invalid Argument");
+    //logger.println("Invalid Argument");
   }
   else if (result == ESP_ERR_ESPNOW_INTERNAL)
   {
-    //Serial.println("Internal Error");
+    //logger.println("Internal Error");
   }
   else if (result == ESP_ERR_ESPNOW_NO_MEM)
   {
-    //Serial.println("ESP_ERR_ESPNOW_NO_MEM");
+    //logger.println("ESP_ERR_ESPNOW_NO_MEM");
   }
   else if (result == ESP_ERR_ESPNOW_NOT_FOUND)
   {
-    // Serial.println("Peer not found.");
+    // logger.println("Peer not found.");
   }
   else
   {
-    //Serial.println("Unknown error");
+    //logger.println("Unknown error");
   }
 }
 
@@ -2994,7 +2999,7 @@ void Start_1() {
   //        FastLED.show();
   // }
   //  Arm the slider to start point ready for second play press
-  //Serial.print("Entering Start1 ");
+  //logger.print("Entering Start1 ");
   digitalWrite(StepFOC, LOW);                                                                              //Engage the focus motor
   digitalWrite(StepD, LOW);
   delay(100);
@@ -3008,8 +3013,8 @@ void Start_1() {
   stepper4->setSpeedInUs(50);
   stepper4->setAcceleration(2000);
   if (SEQ == 0) {
-    //Serial.print("Stepper1 In before move =: ");
-    //Serial.println(TLTin_position);
+    //logger.print("Stepper1 In before move =: ");
+    //logger.println(TLTin_position);
 
 
     stepper1->moveTo(TLTin_position);
@@ -3033,8 +3038,8 @@ void Start_1() {
     delay(10);
   }
 
-  //Serial.print("Stepper1 current position: ");
-  //Serial.println(stepper1->getCurrentPosition());
+  //logger.print("Stepper1 current position: ");
+  //logger.println(stepper1->getCurrentPosition());
 
 
   if (PTZ_ID == 5) {
@@ -3279,7 +3284,7 @@ void Start_4() {
 
     //**********If Slider or Jib is not with us take control**********
     if (Sld == 0 && JB == 0) {
-      //Serial.println("Tlps Trigger from PT");
+      //logger.println("Tlps Trigger from PT");
       //Trigger pantilt head timelapse move
       SendNextionValues();                                                      //Trigger pantilt head timelapse move
       stepper1->setSpeedInHz(300);
@@ -3782,28 +3787,28 @@ void  Start_5() {
   delay(10);
   stepper4_plan();
   delay(10);
-  //  Serial.print("Tlt_move1_Dest:   ");
-  //  Serial.print(Tlt_move1_Dest);
-  //  Serial.print("Pan_move1_Dest:   ");
-  //  Serial.print(Pan_move1_Dest);
-  //  Serial.print("Foc_move1_Dest:   ");
-  //  Serial.print(Foc_move1_Dest);
-  //  Serial.println("**********************");
-  //  Serial.print("Tlt_move2_Dest:   ");
-  //  Serial.print(Tlt_move2_Dest);
-  //  Serial.print("Pan_move2_Dest:   ");
-  //  Serial.print(Pan_move2_Dest);
-  //  Serial.print("Foc_move2_Dest:   ");
-  //  Serial.print(Foc_move2_Dest);
-  //  Serial.println("**********************");
-  //  Serial.print("Tlt_move3_Dest:   ");
-  //  Serial.print(Tlt_move3_Dest);
+  //  logger.print("Tlt_move1_Dest:   ");
+  //  logger.print(Tlt_move1_Dest);
+  //  logger.print("Pan_move1_Dest:   ");
+  //  logger.print(Pan_move1_Dest);
+  //  logger.print("Foc_move1_Dest:   ");
+  //  logger.print(Foc_move1_Dest);
+  //  logger.println("**********************");
+  //  logger.print("Tlt_move2_Dest:   ");
+  //  logger.print(Tlt_move2_Dest);
+  //  logger.print("Pan_move2_Dest:   ");
+  //  logger.print(Pan_move2_Dest);
+  //  logger.print("Foc_move2_Dest:   ");
+  //  logger.print(Foc_move2_Dest);
+  //  logger.println("**********************");
+  //  logger.print("Tlt_move3_Dest:   ");
+  //  logger.print(Tlt_move3_Dest);
   //  mess = Tlt_move3_Dest;
   //  SendNextionValues();
-  //  Serial.print("Pan_move3_Dest:   ");
-  //  Serial.print(Pan_move3_Dest);
-  //  Serial.print("Foc_move3_Dest:   ");
-  //  Serial.print(Foc_move3_Dest);
+  //  logger.print("Pan_move3_Dest:   ");
+  //  logger.print(Pan_move3_Dest);
+  //  logger.print("Foc_move3_Dest:   ");
+  //  logger.print(Foc_move3_Dest);
   //****************************************************move1-2*****************************************
 
   //**********************Pan move****************************
@@ -5665,9 +5670,9 @@ void  Start_5() {
     }
 
   } else  {                                                                     //Bounce must = 0 Finish the move
-    //    Serial.print("End move:   ");
-    //    Serial.print(PTZ_ID);
-    //    Serial.print(Pause);
+    //    logger.print("End move:   ");
+    //    logger.print(PTZ_ID);
+    //    logger.print(Pause);
     if (BounceReturn == 1 && BounceActive == 1) {                                  //Return for last bounce
       BounceReturn = 2;                                                            //Reverse move
       //BounceActive = 0;
@@ -5720,7 +5725,7 @@ void Start_6() {
 //******Set stepper speed based on time distance and amount od ease InOut***********
 void SetSpeed() {
 
-  //Serial.print("Enterring Setpeed");
+  //logger.print("Enterring Setpeed");
   TLTtravel_dist = abs(TLTout_position - TLTin_position);                     // Distance we have to go
   TLTstep_speed = (TLTtravel_dist / Crono_time);
 
@@ -5874,7 +5879,7 @@ void SetSpeed() {
 //This means that a short move will take the sametime asa long move but all axis do there best to arrive at the same time regardless of how much thay move indevidually
 void VISCA_SetPoseSpeed() {
 
-  //Serial.print("Enterring Setpeed");
+  //logger.print("Enterring Setpeed");
   TLTtravel_dist = abs(T_position - stepper1->getCurrentPosition());                     // Distance we have to go
   TLTstep_speed = (TLTtravel_dist / ((VPoseSpeed - (VPoseSpeed * 2)) + 25));
 
@@ -5911,13 +5916,13 @@ void ReadAnalog() {                                  //read joystick
 
     if (TiltJoySpeed > 0) {
       stepper1->runBackward();
-      //Serial.println("TiltStepper is Backwords");
+      //logger.println("TiltStepper is Backwords");
       while (stepper1->isRunning()) {                          //delay until move complete
         tilt = analogRead(tilt_PIN);
         stepper1->setAcceleration (abs(TiltJoySpeed) * 2);
         stepper1->applySpeedAcceleration();
         if (abs(tilt - tilt_AVG) < 250) {
-          //Serial.println("TiltStepper has been stoped");
+          //logger.println("TiltStepper has been stoped");
           stepper1->forceStopAndNewPosition(stepper1->getCurrentPosition());
           return;
         }
@@ -5925,13 +5930,13 @@ void ReadAnalog() {                                  //read joystick
 
     } else {
       stepper1->runForward();
-      //Serial.println("TiltStepper is Forwards");
+      //logger.println("TiltStepper is Forwards");
       while (stepper1->isRunning()) {                          //delay until move complete
         tilt = analogRead(tilt_PIN);
         stepper1->setAcceleration (abs(TiltJoySpeed) * 2);
         stepper1->applySpeedAcceleration();
         if (abs(tilt - tilt_AVG) < 250) {
-          //Serial.println("TiltStepper has been stoped");
+          //logger.println("TiltStepper has been stoped");
           stepper1->forceStopAndNewPosition(stepper1->getCurrentPosition());
           //stepper1->stopMove();
           return;
@@ -8895,7 +8900,7 @@ void PTZ_Control() {
 
       //4Backward move
       if (Joy_Focus_Speed < 1000 && stepper3->getCurrentPosition() < cam_F_In) {
-        Serial.print("Backword move");
+        logger.print("Backword move");
         stepper3->setAcceleration(abs(Joy_Focus_Accel * 2));                                      //If starting fresh Max accel to catch up on turnarround
         stepper3->setSpeedInHz(abs(Joy_Focus_Speed / SpeedScale));
         if (stepper3->getCurrentPosition() > (cam_F_In - 10 ) && abs(Joy_Focus_Speed) > 1000) {  // If close to end
@@ -9047,7 +9052,7 @@ void PTZ_Control() {
 
       //4 Backward move
       if (Joy_Zoo_Speed < 1000 && stepper4->getCurrentPosition() < cam_Z_In) {
-        Serial.print("Backword move");
+        logger.print("Backword move");
         stepper4->setAcceleration(abs(Joy_Zoo_Accel / 3));                                     //If starting fresh Max accel to catch up on turnarround
         stepper4->setSpeedInHz(abs(Joy_Zoo_Speed / SpeedScale));
         if (stepper4->getCurrentPosition() > (cam_Z_In - 500 ) && abs(Joy_Zoo_Speed) > 1000) {  // If close to end
@@ -9807,7 +9812,7 @@ void showNewData() {
     //    T_Rev = 1;                                                              //If were using VISCA reverse the Tilt directions for bad joysticks
     //String Speed = (receivedChars);
     ViscaComand = atoi(receivedChars);
-    //Serial.println(receivedChars);
+    //logger.println(receivedChars);
 
     if (ViscaComand  == 14) {     //Tally light command
       StrTokIndx = strtok(receivedChars, ",");
@@ -9843,7 +9848,7 @@ void showNewData() {
       VTiltSpeed = atoi(StrTokIndx);
     }
     if (ViscaComand  == 9 ) {                             //A VISCA Absolute move request
-      Serial.println("vMix absolute move request received");
+      logger.println("vMix absolute move request received");
       StrTokIndx = strtok(receivedChars, ",");
       ViscaComand = atoi(StrTokIndx);
       StrTokIndx = strtok(NULL, ",");
@@ -9873,47 +9878,47 @@ void parseVISCA() {
   PTZ_Cam = PTZ_ID;                                      //While reading VISA over IP force the system to egnore ID setup
   char buffer[50];
   switch (ViscaComand)  {
-    case 64: Serial.print(", PT Home ");
+    case 64: logger.print(", PT Home ");
       Home(); break;
 
     //IP comands
 
-    case 14: Serial.print("Tally Light Comand");      //Hardware required to control an LED required here This might also be used to trigger on camera recording
+    case 14: logger.print("Tally Light Comand");      //Hardware required to control an LED required here This might also be used to trigger on camera recording
       switch (Tally) {
-        case 0: Serial.println("\nTally 0"); break; //Flashing (in prevue)
-        case 1: Serial.println("\nTally 1"); break; //Flashing (in prevue)
-        case 2: Serial.println("\nTally 2"); break; //Light Always on (Live)
-        case 3: Serial.println("\nTally 3"); break; //Normal or (off inactive)
-        case 4: Serial.println("\nTally 4"); break; //Normal or (off inactive)
+        case 0: logger.println("\nTally 0"); break; //Flashing (in prevue)
+        case 1: logger.println("\nTally 1"); break; //Flashing (in prevue)
+        case 2: logger.println("\nTally 2"); break; //Light Always on (Live)
+        case 3: logger.println("\nTally 3"); break; //Normal or (off inactive)
+        case 4: logger.println("\nTally 4"); break; //Normal or (off inactive)
       }
 
-    case 665: Serial.print("IP1 request");
+    case 665: logger.print("IP1 request");
       sprintf(buffer, "%d\n", IP1 );
       UARTport.print(buffer);
       UARTport.flush(); break;
-    case 666: Serial.print("IP2 request");
+    case 666: logger.print("IP2 request");
       sprintf(buffer, "%d\n", IP2 );
       UARTport.print(buffer);
       UARTport.flush(); break;
 
-    case 667: Serial.print("IP3 request");
+    case 667: logger.print("IP3 request");
       sprintf(buffer, "%d\n", IP3 );
       UARTport.print(buffer);
       UARTport.flush(); break;
 
-    case 668: Serial.print("IP4 request");
+    case 668: logger.print("IP4 request");
       sprintf(buffer, "%d\n", IP4 );
       UARTport.print(buffer);
       UARTport.flush(); break;
 
 
-    case 669: Serial.print("UDPport request");
+    case 669: logger.print("UDPport request");
       UDP = 1259;
       sprintf(buffer, "%d\n", UDP );
       UARTport.print(buffer);
       UARTport.flush(); break;
 
-    case 670: Serial.print("UDPport request");
+    case 670: logger.print("UDPport request");
 
       sprintf(buffer, "%d\n", IPGW );
       UARTport.print(buffer);
@@ -9921,21 +9926,21 @@ void parseVISCA() {
 
 
     //Position reports
-    case 78: Serial.print(", Pan Position? ");        //Return Pan position
+    case 78: logger.print(", Pan Position? ");        //Return Pan position
       sprintf(buffer, "%d\n", PA );
       UARTport.print(buffer);
       UARTport.flush();
-      //Serial.print(buffer);
+      //logger.print(buffer);
       break;
-    case 79: Serial.print(", Tilt Position? ");       //Return Tilt position
+    case 79: logger.print(", Tilt Position? ");       //Return Tilt position
 
       sprintf(buffer, "%d\n", TA );
       UARTport.print(buffer);
       UARTport.flush();
 
-      //Serial.print(buffer);
+      //logger.print(buffer);
       break;
-    case 80: Serial.print(", Zoom Position? ");       //Return Zoom position
+    case 80: logger.print(", Zoom Position? ");       //Return Zoom position
       ZA = stepper4->getCurrentPosition();
       ZA = ZA / ((cam_Z_Out - cam_Z_In) / 100);           //Current position as a % of the posible movement between the limits
       sprintf(buffer, "%d\n", ZA );
@@ -9943,7 +9948,7 @@ void parseVISCA() {
       UARTport.flush();
       break;
 
-    case 81: //Serial.print(", Focus Position? ");       //Return Focus position
+    case 81: //logger.print(", Focus Position? ");       //Return Focus position
       FA = stepper3->getCurrentPosition();
       FA = FA / ((cam_F_Out - cam_F_In) / 100);           //Current position as a % of the posible movement between the limits
       sprintf(buffer, "%d\n", FA );
@@ -9954,11 +9959,11 @@ void parseVISCA() {
     //PT Moves
 
 
-    case 9: Serial.print("Absolute Position request");
+    case 9: logger.print("Absolute Position request");
       VISCApose();
       break;
 
-    case 33: Serial.print("PT Stop ");
+    case 33: logger.print("PT Stop ");
       if (pan_is_moving) {
         Joy_Pan_Speed = (0);
       }
@@ -9978,8 +9983,8 @@ void parseVISCA() {
 
 
 
-    case 13: Serial.print("Pan Left ");
-      Serial.println(VPanSpeed);
+    case 13: logger.print("Pan Left ");
+      logger.println(VPanSpeed);
       Joy_Pan_Accel = 2000;
       if (VPanSpeed < 3) {
         Joy_Pan_Speed = (VPanSpeed * 200);
@@ -9990,8 +9995,8 @@ void parseVISCA() {
       }
       break;
 
-    case 23: Serial.print("Pan Right ");
-      Serial.println(VPanSpeed);
+    case 23: logger.print("Pan Right ");
+      logger.println(VPanSpeed);
       Joy_Pan_Accel = 2000;
       if (VPanSpeed < 3) {
         Joy_Pan_Speed = (VPanSpeed * 200);
@@ -10002,8 +10007,8 @@ void parseVISCA() {
       }
       break;
 
-    case 31: Serial.print("Tilt Up ");
-      Serial.println(VTiltSpeed);
+    case 31: logger.print("Tilt Up ");
+      logger.println(VTiltSpeed);
       if (VTiltSpeed < 3) {
         Joy_Tilt_Speed = (VTiltSpeed * 200);
       } else {
@@ -10012,8 +10017,8 @@ void parseVISCA() {
       Joy_Tilt_Speed = Joy_Tilt_Speed * 2;
       break;
 
-    case 32: Serial.print("Tilt Down ");
-      Serial.println(VTiltSpeed);
+    case 32: logger.print("Tilt Down ");
+      logger.println(VTiltSpeed);
       if (VTiltSpeed < 3) {
         Joy_Tilt_Speed = (VTiltSpeed * 200);
         Joy_Tilt_Speed = (Joy_Tilt_Speed - (Joy_Tilt_Speed * 2));   //Posative to negative value
@@ -10026,10 +10031,10 @@ void parseVISCA() {
 
 
 
-    case 11: Serial.print("Up Left ");
-      Serial.print(VPanSpeed);
-      Serial.print(" , ");
-      Serial.println(VTiltSpeed);
+    case 11: logger.print("Up Left ");
+      logger.print(VPanSpeed);
+      logger.print(" , ");
+      logger.println(VTiltSpeed);
       Joy_Pan_Accel = 2000;
       if (VPanSpeed < 3) {
         Joy_Pan_Speed = (VPanSpeed * 200);
@@ -10044,10 +10049,10 @@ void parseVISCA() {
         Joy_Tilt_Speed = (VTiltSpeed * 150);
       } break;
 
-    case 21: Serial.print("Up Right ");
-      Serial.print(VPanSpeed);
-      Serial.print(" , ");
-      Serial.println(VTiltSpeed);
+    case 21: logger.print("Up Right ");
+      logger.print(VPanSpeed);
+      logger.print(" , ");
+      logger.println(VTiltSpeed);
       Joy_Pan_Accel = 2000;
       if (VPanSpeed < 3) {
         Joy_Pan_Speed = (VPanSpeed * 200);
@@ -10064,10 +10069,10 @@ void parseVISCA() {
 
       break;
 
-    case 12: Serial.print("Down Left ");
-      Serial.print(VPanSpeed);
-      Serial.print(" , ");
-      Serial.println(VTiltSpeed);
+    case 12: logger.print("Down Left ");
+      logger.print(VPanSpeed);
+      logger.print(" , ");
+      logger.println(VTiltSpeed);
       Joy_Pan_Accel = 2000;
       if (VPanSpeed < 3) {
         Joy_Pan_Speed = (VPanSpeed * 200);
@@ -10084,10 +10089,10 @@ void parseVISCA() {
         Joy_Tilt_Speed = (Joy_Tilt_Speed - (Joy_Tilt_Speed * 2));   //Posative to negative value
       } break;
 
-    case 22: Serial.print("Down Right ");
-      Serial.print(VPanSpeed);
-      Serial.print(" , ");
-      Serial.println(VTiltSpeed);
+    case 22: logger.print("Down Right ");
+      logger.print(VPanSpeed);
+      logger.print(" , ");
+      logger.println(VTiltSpeed);
       Joy_Pan_Accel = 2000;
       if (VPanSpeed < 3) {
         Joy_Pan_Speed = (VPanSpeed * 200);
@@ -10106,187 +10111,187 @@ void parseVISCA() {
       break;
 
     //Zoom moves
-    case 700: Serial.print("Zoom Stop ");
+    case 700: logger.print("Zoom Stop ");
       if (Zoo_is_moving) {
         Joy_Zoo_Speed = (0);
       } break;
-    case 748: Serial.print("Zoom out p1  ");
+    case 748: logger.print("Zoom out p1  ");
       VZoomSpeed = 1010;
       Joy_Zoo_Speed = (VZoomSpeed ); break;
 
-    case 749: Serial.print(", Zoom out p2  ");
+    case 749: logger.print(", Zoom out p2  ");
       VZoomSpeed = 1500;
       Joy_Zoo_Speed = (VZoomSpeed ); break;
-    case 750: Serial.print(", Zoom out p3  ");
+    case 750: logger.print(", Zoom out p3  ");
       VZoomSpeed = 2000;
       Joy_Zoo_Speed = (VZoomSpeed ); break;
-    case 751: Serial.print(", Zoom out p4  ");
+    case 751: logger.print(", Zoom out p4  ");
       VZoomSpeed = 2500; break;
       Joy_Zoo_Speed = (VZoomSpeed ); break;
-    case 752: Serial.print(", Zoom out p5  ");
+    case 752: logger.print(", Zoom out p5  ");
       VZoomSpeed = 3000;
       Joy_Zoo_Speed = (VZoomSpeed ); break;
-    case 753: Serial.print(", Zoom out p6  ");
+    case 753: logger.print(", Zoom out p6  ");
       VZoomSpeed = 3500;
       Joy_Zoo_Speed = (VZoomSpeed ); break;
-    case 754: Serial.print(", Zoom out p7  ");
+    case 754: logger.print(", Zoom out p7  ");
       VZoomSpeed = 4000;
       Joy_Zoo_Speed = (VZoomSpeed ); break;
-    case 755: Serial.print(", Zoom out p8  ");
+    case 755: logger.print(", Zoom out p8  ");
       VZoomSpeed = 4500; break;
       Joy_Zoo_Speed = (VZoomSpeed ); break;
-    case 756: Serial.print(", Zoom out p9  ");
+    case 756: logger.print(", Zoom out p9  ");
       VZoomSpeed = 5000;
       Joy_Zoo_Speed = (VZoomSpeed ); break;
 
-    case 732: Serial.print(", Zoom in p1 ");
+    case 732: logger.print(", Zoom in p1 ");
       VZoomSpeed = 1010;
       Joy_Zoo_Speed = (VZoomSpeed );
       Joy_Zoo_Speed = (Joy_Zoo_Speed - (Joy_Zoo_Speed * 2));   //Posative to negative value
       break;
 
-    case 733: Serial.print(", Zoom in p2 ");
+    case 733: logger.print(", Zoom in p2 ");
       VZoomSpeed = 1500;
       Joy_Zoo_Speed = (VZoomSpeed );
       Joy_Zoo_Speed = (Joy_Zoo_Speed - (Joy_Zoo_Speed * 2));   //Posative to negative value
       break;
-    case 734: Serial.print(", Zoom in p3 ");
+    case 734: logger.print(", Zoom in p3 ");
       VZoomSpeed = 2000;
       Joy_Zoo_Speed = (VZoomSpeed );
       Joy_Zoo_Speed = (Joy_Zoo_Speed - (Joy_Zoo_Speed * 2));   //Posative to negative value
       break;
-    case 735: Serial.print(", Zoom in p4 ");
+    case 735: logger.print(", Zoom in p4 ");
       VZoomSpeed = 2500;
       Joy_Zoo_Speed = (VZoomSpeed );
       Joy_Zoo_Speed = (Joy_Zoo_Speed - (Joy_Zoo_Speed * 2));   //Posative to negative value
       break;
-    case 736: Serial.print(", Zoom in p5 ");
+    case 736: logger.print(", Zoom in p5 ");
       VZoomSpeed = 3000;
       Joy_Zoo_Speed = (VZoomSpeed );
       Joy_Zoo_Speed = (Joy_Zoo_Speed - (Joy_Zoo_Speed * 2));   //Posative to negative value
       break;
-    case 737: Serial.print(", Zoom in p6 ");
+    case 737: logger.print(", Zoom in p6 ");
       VZoomSpeed = 3500;
       Joy_Zoo_Speed = (VZoomSpeed );
       Joy_Zoo_Speed = (Joy_Zoo_Speed - (Joy_Zoo_Speed * 2));   //Posative to negative value
       break;
-    case 738: Serial.print(", Zoom in p7 ");
+    case 738: logger.print(", Zoom in p7 ");
       VZoomSpeed = 4000;
       Joy_Zoo_Speed = (VZoomSpeed );
       Joy_Zoo_Speed = (Joy_Zoo_Speed - (Joy_Zoo_Speed * 2));   //Posative to negative value
       break;
-    case 739: Serial.print(", Zoom in p8 ");
+    case 739: logger.print(", Zoom in p8 ");
       VZoomSpeed = 4500;
       Joy_Zoo_Speed = (VZoomSpeed );
       Joy_Zoo_Speed = (Joy_Zoo_Speed - (Joy_Zoo_Speed * 2));   //Posative to negative value
       break;
 
     //Focus
-    case 800: Serial.print(", Focus Stop ");
+    case 800: logger.print(", Focus Stop ");
       if (focus_is_moving) {
         Joy_Focus_Speed = (0);
       } break;
 
-    case 832: Serial.print(", Focus Near p1 ");
+    case 832: logger.print(", Focus Near p1 ");
       VFocusSpeed = 1010;
       Joy_Focus_Speed = (VFocusSpeed ); break;
 
-    case 833: Serial.print(", Focus Near p2 ");
+    case 833: logger.print(", Focus Near p2 ");
       VFocusSpeed = 1500;
       Joy_Focus_Speed = (VFocusSpeed ); break;
 
-    case 834: Serial.print(", Focus Near p3 ");
+    case 834: logger.print(", Focus Near p3 ");
       VFocusSpeed = 2000;
       Joy_Focus_Speed = (VFocusSpeed ); break;
 
-    case 835: Serial.print(", Focus Near p4 ");
+    case 835: logger.print(", Focus Near p4 ");
       VFocusSpeed = 2500;
       Joy_Focus_Speed = (VFocusSpeed ); break;
 
-    case 836: Serial.print(", Focus Near p5 ");
+    case 836: logger.print(", Focus Near p5 ");
       VFocusSpeed = 3000;
       Joy_Focus_Speed = (VFocusSpeed ); break;
 
-    case 837: Serial.print(", Focus Near p6 ");
+    case 837: logger.print(", Focus Near p6 ");
       VFocusSpeed = 3500;
       Joy_Focus_Speed = (VFocusSpeed ); break;
 
-    case 838: Serial.print(", Focus Near p7 ");
+    case 838: logger.print(", Focus Near p7 ");
       VFocusSpeed = 4000;
       Joy_Focus_Speed = (VFocusSpeed ); break;
 
-    case 839: Serial.print(", Focus Near p8 ");
+    case 839: logger.print(", Focus Near p8 ");
       VFocusSpeed = 4500;; break;
       Joy_Focus_Speed = (VFocusSpeed ); break;
 
     //Focus Far
 
-    case 848: Serial.print(", Focus Far p1 ");
+    case 848: logger.print(", Focus Far p1 ");
       VFocusSpeed = 1010;
       Joy_Focus_Speed = (VFocusSpeed );
       Joy_Focus_Speed = (Joy_Focus_Speed - (Joy_Focus_Speed * 2));   //Posative to negative value
       break;
 
-    case 849: Serial.print(", Focus Far p2 ");
+    case 849: logger.print(", Focus Far p2 ");
       VFocusSpeed = 1500;
       Joy_Focus_Speed = (VFocusSpeed );
       Joy_Focus_Speed = (Joy_Focus_Speed - (Joy_Focus_Speed * 2));   //Posative to negative value
       break;
 
-    case 850: Serial.print(", Focus Far p3 ");
+    case 850: logger.print(", Focus Far p3 ");
       VFocusSpeed = 2000;
       Joy_Focus_Speed = (VFocusSpeed );
       Joy_Focus_Speed = (Joy_Focus_Speed - (Joy_Focus_Speed * 2));   //Posative to negative value
       break;
 
-    case 851: Serial.print(", Focus Far p4 ");
+    case 851: logger.print(", Focus Far p4 ");
       VFocusSpeed = 2500;
       Joy_Focus_Speed = (VFocusSpeed );
       Joy_Focus_Speed = (Joy_Focus_Speed - (Joy_Focus_Speed * 2));   //Posative to negative value
       break;
 
-    case 852: Serial.print(", Focus Far p5 ");
+    case 852: logger.print(", Focus Far p5 ");
       VFocusSpeed = 3000;
       Joy_Focus_Speed = (VFocusSpeed );
       Joy_Focus_Speed = (Joy_Focus_Speed - (Joy_Focus_Speed * 2));   //Posative to negative value
       break;
 
-    case 853: Serial.print(", Focus Far p6 ");
+    case 853: logger.print(", Focus Far p6 ");
       VFocusSpeed = 3500;
       Joy_Focus_Speed = (VFocusSpeed );
       Joy_Focus_Speed = (Joy_Focus_Speed - (Joy_Focus_Speed * 2));   //Posative to negative value
       break;
 
-    case 854: Serial.print(", Focus Far p7 ");
+    case 854: logger.print(", Focus Far p7 ");
       VFocusSpeed = 4000;
       Joy_Focus_Speed = (VFocusSpeed );
       Joy_Focus_Speed = (Joy_Focus_Speed - (Joy_Focus_Speed * 2));   //Posative to negative value
       break;
 
-    case 855: Serial.print(", Focus Far p8 "); break;
+    case 855: logger.print(", Focus Far p8 "); break;
       VFocusSpeed = 4500;
       Joy_Focus_Speed = (VFocusSpeed );
       Joy_Focus_Speed = (Joy_Focus_Speed - (Joy_Focus_Speed * 2));   //Posative to negative value
       break;
 
     //Ramp
-    case 4901: Serial.print(", Ramp/EaseValue=1 "); break;
-    case 4902: Serial.print(", Ramp/EaseValue=2 "); break;
-    case 4903: Serial.print(", Ramp/EaseValue=3 "); break;
-    case 2: Serial.print(", Start Recore "); break;
+    case 4901: logger.print(", Ramp/EaseValue=1 "); break;
+    case 4902: logger.print(", Ramp/EaseValue=2 "); break;
+    case 4903: logger.print(", Ramp/EaseValue=3 "); break;
+    case 2: logger.print(", Start Recore "); break;
 
 
 
     //Pose positions
-    case 41: Serial.print(", Save Pose:  ");
-      Serial.println(PTZ_Pose);
+    case 41: logger.print(", Save Pose:  ");
+      logger.println(PTZ_Pose);
       PTZ_Cam = PTZ_ID;
       lastPTZ_Pose = PTZ_Pose;
       PTZ_Save();
       break;
 
-    case 42: Serial.print(", Move to pose ");
-      Serial.println(PTZ_Pose);
+    case 42: logger.print(", Move to pose ");
+      logger.println(PTZ_Pose);
       lastPTZ_Pose = PTZ_Pose;
       SendNextionValues();
       if (PTZ_Pose == 100 && LM == 0) {                    //If PTZ pose request is 100 the enter Set Limits routeen
@@ -10308,13 +10313,13 @@ void parseVISCA() {
 
       break;
 
-    case 40: Serial.print(", Clear Pose:  ");
-      Serial.println(PTZ_Pose);
+    case 40: logger.print(", Clear Pose:  ");
+      logger.println(PTZ_Pose);
       PTZ_ClearP();
       break;
 
-    case 137: Serial.print(", Pose speed ");
-      Serial.println("VPoseSpeed");                      //action required here to get the pose speed
+    case 137: logger.print(", Pose speed ");
+      logger.println("VPoseSpeed");                      //action required here to get the pose speed
       break;
 
 
@@ -10324,9 +10329,9 @@ void parseVISCA() {
 
 
     //Record
-    case 3: Serial.print(", Stop Record "); break;
+    case 3: logger.print(", Stop Record "); break;
 
-    case 126: Serial.print(", Record Mode setting "); break;
+    case 126: logger.print(", Record Mode setting "); break;
 
   }
 }
@@ -10596,7 +10601,7 @@ void VISCApose() {
 
 
 void saveIP() {
-  Serial.printf("Saving IP Adress: %d.%d.%d.%d %d\n", IP1, IP2, IP3, IP4, IPGW, UDP);
+  logger.printf("Saving IP Adress: %d.%d.%d.%d %d\n", IP1, IP2, IP3, IP4, IPGW, UDP);
   SysMemory.begin("IPvalues", false);                         //save to memory
   SysMemory.putUInt("IP1", IP1);
   SysMemory.putUInt("IP2", IP2);
@@ -10608,7 +10613,7 @@ void saveIP() {
 }
 
 void Home() {
-  Serial.print("Running HOME ");
+  logger.print("Running HOME ");
   digitalWrite(StepFOC, LOW);                                   //Power up the steppers
   digitalWrite(StepD, LOW);
   stepper1->setSpeedInHz(5000);                                 //Tilt
