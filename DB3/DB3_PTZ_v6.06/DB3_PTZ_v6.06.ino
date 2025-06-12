@@ -67,9 +67,10 @@
 #include <Adafruit_SSD1306.h>
 #include <HardwareSerial.h>
 #include "Logger.h"
+#include "WifiConfigManager.h"
 
-// Create Logger instance with 10 lines (default)
 Logger logger;
+WiFiConfigManager wifiManager(&receiveCallback, &sentCallback, logger);
 
 HardwareSerial UARTport(2); // use UART2 for VISCA comumication
 
@@ -894,7 +895,8 @@ void TCA9548A(uint8_t bus) {
 
 void setup() {
   logger.begin();
-  logger.print("Logger initialized");
+  logger.println("Logger initialized");
+  wifiManager.setup();
 
   //Setup for Tally LED
   FastLED.addLeds<WS2812B, DATA_PIN, GRB>(leds, NUM_LEDS);
@@ -913,7 +915,7 @@ void setup() {
   //  delay(100);
   //  disableCore1WDT();
 
-  engine.init();
+  engine.init(1); // run StepperTask on CPU 1, since there is too much cpu contention on CPU 0, triggering the watchdog and causing endless reboots, see https://github.com/gin66/FastAccelStepper/issues/106
   stepper1 = engine.stepperConnectToPin(step1_pinSTEP);
   if (stepper1) {
     stepper1->setDirectionPin(step1_pinDIR);
@@ -942,25 +944,8 @@ void setup() {
   Wire.begin();
   logger.println("\nRunning DigitalBird DB3 Pan Tilt Head software version 1.0\n");
   UARTport.begin(9600, SERIAL_8N1, 16, 17);
-
-  //********************Setup Radio ESP-NOW**********************************//
-  WiFi.mode(WIFI_STA);
-
-  logger.println("\nmacAdress is:\n");
-  logger.print(WiFi.macAddress());
-  WiFi.disconnect();
-
-  //******************Setup ESP_now***************************
-  if (esp_now_init() == ESP_OK) {
-    logger.println("ESPNow Init Sucess");
-    esp_now_register_recv_cb(receiveCallback);
-    esp_now_register_send_cb(sentCallback);
-  } else {
-    logger.println("ESPNow Init Failed");
-    delay(3000);
-    ESP.restart();
-  }
-
+  
+  
   //  pin setups
 
   pinMode(BatPin, INPUT);
@@ -1007,11 +992,12 @@ void setup() {
 
 
 
-
+  logger.println("setup() completed");
 }//end setup
 
 
 void loop() {
+  wifiManager.loop();
   //TA=20;
   //PA=20;
   //FA=20;
@@ -1413,7 +1399,6 @@ void loop() {
     ClearKeys();
     clrK = 0;
   }
-
 } //end loop
 
 
