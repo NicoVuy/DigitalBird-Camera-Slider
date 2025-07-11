@@ -68,6 +68,7 @@
 #include <HardwareSerial.h>
 #include "Logger.h"
 #include "WifiConfigManager.h"
+#include "UDPPacketHandler.h"
 
 Logger logger;
 WiFiConfigManager wifiManager(&receiveCallback, &sentCallback, logger);
@@ -220,6 +221,8 @@ int Joy_Zoo_Speed;
 int Joy_Zoo_Accel;
 int Focus_Stop;
 int Zoo_Stop;
+
+UDPPacketHandler udpvisca(&Joy_Pan_Speed, &Joy_Pan_Accel, &Joy_Tilt_Speed, &Joy_Tilt_Accel, logger, Home, Stop);
 
 int Rec;                                      //Record request 0 -1
 int lastRecState;                             //Last Record button state for camera
@@ -988,6 +991,8 @@ void setup() {
   delay(100);
   disableCore1WDT();
 
+  udpvisca.begin(stepper1, stepper2);
+
   delay(2000);
 
 
@@ -1036,6 +1041,7 @@ void loop() {
 
 
 
+  udpvisca.processPackets();
   listenForVisca();
 
   //IF the Jib is present then make sure that the ease value is at least 1 for all moves.
@@ -9781,12 +9787,17 @@ void  listenForVisca() {
         ndx = numChars - 1;
       }
     }
-    else {
-      receivedChars[ndx] = '\0'; // terminate the string
+    else {     
+      receivedChars[ndx] = '\0'; // terminate the string 
       ndx = 0;
       newData = true;
+      if (newData)
+      {  
+        logger.printf("\nReceived Visca command '%s'", receivedChars);
+      }
     }
-  }
+  }  
+  
   showNewData();
 }
 
@@ -9859,16 +9870,34 @@ void showNewData() {
   }
   newData = false;
 }
+
+void Stop(){
+ logger.println("\nPT Stop ");
+  if (pan_is_moving) {
+    Joy_Pan_Speed = (0);
+  }
+  if (tilt_is_moving) {
+    Joy_Tilt_Speed = (0);
+  }
+  if (focus_is_moving) {
+    Joy_Focus_Speed = (0);
+  }
+  if (Zoo_is_moving) {
+    Joy_Zoo_Speed = (0);
+
+  }
+}
+
 void parseVISCA() {
   PTZ_Cam = PTZ_ID;                                      //While reading VISA over IP force the system to egnore ID setup
   char buffer[50];
   switch (ViscaComand)  {
-    case 64: logger.print(", PT Home ");
+    case 64: logger.println("PT Home ");
       Home(); break;
 
     //IP comands
 
-    case 14: logger.print("Tally Light Comand");      //Hardware required to control an LED required here This might also be used to trigger on camera recording
+    case 14: logger.println("Tally Light Comand");      //Hardware required to control an LED required here This might also be used to trigger on camera recording
       switch (Tally) {
         case 0: logger.println("\nTally 0"); break; //Flashing (in prevue)
         case 1: logger.println("\nTally 1"); break; //Flashing (in prevue)
@@ -9877,33 +9906,33 @@ void parseVISCA() {
         case 4: logger.println("\nTally 4"); break; //Normal or (off inactive)
       }
 
-    case 665: logger.print("IP1 request");
+    case 665: logger.println("IP1 request");
       sprintf(buffer, "%d\n", IP1 );
       UARTport.print(buffer);
       UARTport.flush(); break;
-    case 666: logger.print("IP2 request");
+    case 666: logger.println("IP2 request");
       sprintf(buffer, "%d\n", IP2 );
       UARTport.print(buffer);
       UARTport.flush(); break;
 
-    case 667: logger.print("IP3 request");
+    case 667: logger.println("IP3 request");
       sprintf(buffer, "%d\n", IP3 );
       UARTport.print(buffer);
       UARTport.flush(); break;
 
-    case 668: logger.print("IP4 request");
+    case 668: logger.println("IP4 request");
       sprintf(buffer, "%d\n", IP4 );
       UARTport.print(buffer);
       UARTport.flush(); break;
 
 
-    case 669: logger.print("UDPport request");
+    case 669: logger.println("UDPport request");
       UDP = 1259;
       sprintf(buffer, "%d\n", UDP );
       UARTport.print(buffer);
       UARTport.flush(); break;
 
-    case 670: logger.print("UDPport request");
+    case 670: logger.println("IPGW request");
 
       sprintf(buffer, "%d\n", IPGW );
       UARTport.print(buffer);
@@ -9911,13 +9940,13 @@ void parseVISCA() {
 
 
     //Position reports
-    case 78: logger.print(", Pan Position? ");        //Return Pan position
+    case 78: logger.printf("\nPan Position %d (current %d) ", PA, stepper2->getCurrentPosition());        //Return Pan position
       sprintf(buffer, "%d\n", PA );
       UARTport.print(buffer);
       UARTport.flush();
       //logger.print(buffer);
       break;
-    case 79: logger.print(", Tilt Position? ");       //Return Tilt position
+    case 79: logger.printf("\nTilt Position %d (current %d) ", TA, stepper1->getCurrentPosition());       //Return Tilt position
 
       sprintf(buffer, "%d\n", TA );
       UARTport.print(buffer);
@@ -9925,7 +9954,7 @@ void parseVISCA() {
 
       //logger.print(buffer);
       break;
-    case 80: logger.print(", Zoom Position? ");       //Return Zoom position
+    case 80: logger.printf("\nZoom Position ");       //Return Zoom position
       ZA = stepper4->getCurrentPosition();
       ZA = ZA / ((cam_Z_Out - cam_Z_In) / 100);           //Current position as a % of the posible movement between the limits
       sprintf(buffer, "%d\n", ZA );
@@ -9933,7 +9962,7 @@ void parseVISCA() {
       UARTport.flush();
       break;
 
-    case 81: //logger.print(", Focus Position? ");       //Return Focus position
+    case 81: logger.printf("\nFocus Position ");       //Return Focus position
       FA = stepper3->getCurrentPosition();
       FA = FA / ((cam_F_Out - cam_F_In) / 100);           //Current position as a % of the posible movement between the limits
       sprintf(buffer, "%d\n", FA );
@@ -9948,28 +9977,14 @@ void parseVISCA() {
       VISCApose();
       break;
 
-    case 33: logger.print("PT Stop ");
-      if (pan_is_moving) {
-        Joy_Pan_Speed = (0);
-      }
-      if (tilt_is_moving) {
-        Joy_Tilt_Speed = (0);
-      }
-      if (focus_is_moving) {
-        Joy_Focus_Speed = (0);
-      }
-      if (Zoo_is_moving) {
-        Joy_Zoo_Speed = (0);
-
-      }
+    case 33: Stop();
       break;
 
 
 
 
 
-    case 13: logger.print("Pan Left ");
-      logger.println(VPanSpeed);
+    case 13: logger.printf("\nPan Left %d", VPanSpeed);
       Joy_Pan_Accel = 2000;
       if (VPanSpeed < 3) {
         Joy_Pan_Speed = (VPanSpeed * 200);
@@ -9978,10 +9993,10 @@ void parseVISCA() {
         Joy_Pan_Speed = (VPanSpeed * 150);
         Joy_Pan_Speed = (Joy_Pan_Speed - (Joy_Pan_Speed * 2));   //Posative to negative value
       }
+      logger.printf(" -> Joy_Pan_Speed %d", Joy_Pan_Speed);
       break;
 
-    case 23: logger.print("Pan Right ");
-      logger.println(VPanSpeed);
+    case 23: logger.printf("\nPan Right %d", VPanSpeed);
       Joy_Pan_Accel = 2000;
       if (VPanSpeed < 3) {
         Joy_Pan_Speed = (VPanSpeed * 200);
@@ -9990,19 +10005,20 @@ void parseVISCA() {
         Joy_Pan_Speed = (VPanSpeed * 150);
 
       }
+      logger.printf(" -> Joy_Pan_Speed %d", Joy_Pan_Speed);      
       break;
 
-    case 31: logger.print("Tilt Up ");
-      logger.println(VTiltSpeed);
+    case 31: logger.printf("\nTilt Up %d ", VTiltSpeed);
       if (VTiltSpeed < 3) {
         Joy_Tilt_Speed = (VTiltSpeed * 200);
       } else {
         Joy_Tilt_Speed = (VTiltSpeed * 150);
       }
       Joy_Tilt_Speed = Joy_Tilt_Speed * 2;
+      logger.printf(" -> Joy_Tilt_Speed %d", Joy_Tilt_Speed);      
       break;
 
-    case 32: logger.print("Tilt Down ");
+    case 32: logger.printf("\nTilt Down %d", VTiltSpeed);
       logger.println(VTiltSpeed);
       if (VTiltSpeed < 3) {
         Joy_Tilt_Speed = (VTiltSpeed * 200);
@@ -10012,14 +10028,12 @@ void parseVISCA() {
         Joy_Tilt_Speed = (Joy_Tilt_Speed - (Joy_Tilt_Speed * 2));   //Posative to negative value
       }
       Joy_Tilt_Speed = Joy_Tilt_Speed * 2;
+      logger.printf(" -> Joy_Tilt_Speed %d", Joy_Tilt_Speed);      
       break;
 
 
 
-    case 11: logger.print("Up Left ");
-      logger.print(VPanSpeed);
-      logger.print(" , ");
-      logger.println(VTiltSpeed);
+    case 11: logger.printf("\nUp Left %d, %d", VPanSpeed, VTiltSpeed);
       Joy_Pan_Accel = 2000;
       if (VPanSpeed < 3) {
         Joy_Pan_Speed = (VPanSpeed * 200);
@@ -10032,12 +10046,11 @@ void parseVISCA() {
         Joy_Tilt_Speed = (VTiltSpeed * 200);
       } else {
         Joy_Tilt_Speed = (VTiltSpeed * 150);
-      } break;
+      }
+      logger.printf(" -> Joy_Pan_Speed %d, Joy_Tilt_Speed %d", Joy_Pan_Speed, Joy_Tilt_Speed); 
+      break;
 
-    case 21: logger.print("Up Right ");
-      logger.print(VPanSpeed);
-      logger.print(" , ");
-      logger.println(VTiltSpeed);
+    case 21: logger.printf("\nUp Right  %d, %d", VPanSpeed, VTiltSpeed);
       Joy_Pan_Accel = 2000;
       if (VPanSpeed < 3) {
         Joy_Pan_Speed = (VPanSpeed * 200);
@@ -10051,13 +10064,11 @@ void parseVISCA() {
       } else {
         Joy_Tilt_Speed = (VTiltSpeed * 150);
       }
+      logger.printf(" -> Joy_Pan_Speed %d, Joy_Tilt_Speed %d", Joy_Pan_Speed, Joy_Tilt_Speed); 
 
       break;
 
-    case 12: logger.print("Down Left ");
-      logger.print(VPanSpeed);
-      logger.print(" , ");
-      logger.println(VTiltSpeed);
+    case 12: logger.printf("\nDown Left  %d, %d", VPanSpeed, VTiltSpeed);
       Joy_Pan_Accel = 2000;
       if (VPanSpeed < 3) {
         Joy_Pan_Speed = (VPanSpeed * 200);
@@ -10072,12 +10083,11 @@ void parseVISCA() {
       } else {
         Joy_Tilt_Speed = (VTiltSpeed * 150);
         Joy_Tilt_Speed = (Joy_Tilt_Speed - (Joy_Tilt_Speed * 2));   //Posative to negative value
-      } break;
+      } 
+      logger.printf(" -> Joy_Pan_Speed %d, Joy_Tilt_Speed %d", Joy_Pan_Speed, Joy_Tilt_Speed); 
+      break;
 
-    case 22: logger.print("Down Right ");
-      logger.print(VPanSpeed);
-      logger.print(" , ");
-      logger.println(VTiltSpeed);
+    case 22: logger.printf("\nDown Right %d, %d", VPanSpeed, VTiltSpeed);
       Joy_Pan_Accel = 2000;
       if (VPanSpeed < 3) {
         Joy_Pan_Speed = (VPanSpeed * 200);
@@ -10093,6 +10103,8 @@ void parseVISCA() {
         Joy_Tilt_Speed = (VTiltSpeed * 150);
         Joy_Tilt_Speed = (Joy_Tilt_Speed - (Joy_Tilt_Speed * 2));   //Posative to negative value
       }
+      logger.printf(" -> Joy_Pan_Speed %d, Joy_Tilt_Speed %d", Joy_Pan_Speed, Joy_Tilt_Speed); 
+
       break;
 
     //Zoom moves
