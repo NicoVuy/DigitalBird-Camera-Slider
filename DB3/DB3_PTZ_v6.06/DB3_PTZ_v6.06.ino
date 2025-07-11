@@ -69,49 +69,17 @@
 #include "Logger.h"
 #include "WifiConfigManager.h"
 #include "UDPPacketHandler.h"
+#include "oled.h"
+
 
 Logger logger;
+
+#include "tallyled.h"
+
 WiFiConfigManager wifiManager(&receiveCallback, &sentCallback, logger);
 
 HardwareSerial UARTport(2); // use UART2 for VISCA comumication
 
-#define SCREEN_WIDTH 128 // OLED display width, in pixels
-#define SCREEN_HEIGHT 32 // OLED display height, in pixels
-
-#define OLED_RESET 4
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
-
-#define LOGO_HEIGHT   10
-#define LOGO_WIDTH    25
-
-#define NUM_LEDS 2
-#define DATA_PIN 19
-CRGB leds[NUM_LEDS];
-
-// 'Bat25', 25x10px
-const unsigned char logo_bmp1 [] PROGMEM = {
-  0x3f, 0xff, 0xff, 0x00, 0x40, 0x00, 0x00, 0x80, 0x40, 0x00, 0x1e, 0x80, 0xc0, 0x00, 0x1e, 0x80,
-  0xc0, 0x00, 0x1e, 0x80, 0xc0, 0x00, 0x1e, 0x80, 0xc0, 0x00, 0x1e, 0x80, 0x40, 0x00, 0x1e, 0x80,
-  0x40, 0x00, 0x00, 0x80, 0x3f, 0xff, 0xff, 0x00
-};
-// 'Bat50', 25x10px
-const unsigned char logo_bmp2 [] PROGMEM = {
-  0x3f, 0xff, 0xff, 0x00, 0x40, 0x00, 0x00, 0x80, 0x40, 0x03, 0xde, 0x80, 0xc0, 0x03, 0xde, 0x80,
-  0xc0, 0x03, 0xde, 0x80, 0xc0, 0x03, 0xde, 0x80, 0xc0, 0x03, 0xde, 0x80, 0x40, 0x03, 0xde, 0x80,
-  0x40, 0x00, 0x00, 0x80, 0x3f, 0xff, 0xff, 0x00
-};
-// 'Bat75', 25x10px
-const unsigned char logo_bmp3 [] PROGMEM = {
-  0x3f, 0xff, 0xff, 0x00, 0x40, 0x00, 0x00, 0x80, 0x40, 0x7b, 0xde, 0x80, 0xc0, 0x7b, 0xde, 0x80,
-  0xc0, 0x7b, 0xde, 0x80, 0xc0, 0x7b, 0xde, 0x80, 0xc0, 0x7b, 0xde, 0x80, 0x40, 0x7b, 0xde, 0x80,
-  0x40, 0x00, 0x00, 0x80, 0x3f, 0xff, 0xff, 0x00
-};
-// 'Bat100', 25x10px
-const unsigned char logo_bmp4 [] PROGMEM = {
-  0x3f, 0xff, 0xff, 0x00, 0x40, 0x00, 0x00, 0x80, 0x4f, 0x7b, 0xde, 0x80, 0xcf, 0x7b, 0xde, 0x80,
-  0xcf, 0x7b, 0xde, 0x80, 0xcf, 0x7b, 0xde, 0x80, 0xcf, 0x7b, 0xde, 0x80, 0x4f, 0x7b, 0xde, 0x80,
-  0x40, 0x00, 0x00, 0x80, 0x3f, 0xff, 0xff, 0x00
-};
 
 
 Preferences SysMemory;
@@ -175,7 +143,7 @@ int Zoomposition;
 int Snd;
 int clrK;                                     //Clear all keys 1 or 0
 int stopM_active;
-int OLED_ID;
+
 int lastP1;
 int lastP2;
 int lastP3;
@@ -780,7 +748,7 @@ long FA = 0;  //Focus angle
 String PanPPPPP = "05C26"; //Left100
 String TiltTTTT = "1BA5"; //Up30
 int TLY = 1;
-int Tally;
+
 
 const byte bufferSize = 32;
 char serialBuffer[bufferSize];
@@ -893,26 +861,15 @@ void TCA9548A(uint8_t bus) {
 }
 
 
-
-
-
 void setup() {
   logger.begin();
   logger.println("Logger initialized");
   wifiManager.setup();
 
-  //Setup for Tally LED
-  FastLED.addLeds<WS2812B, DATA_PIN, GRB>(leds, NUM_LEDS);
-  FastLED.setBrightness(90);
+  SetupTallyLed();
 
-  //*************************************Setup OLED****************************
-  TCA9548A(4);
-  // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
-  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Address 0x3D for 128x64
-    logger.println(F("SSD1306 allocation failed"));
-    for (;;); // Don't proceed, loop forever
-  }
-  display.clearDisplay();
+
+  SetupOled(logger);
   //*************************************Setup a core to run Encoder****************************
   //  xTaskCreatePinnedToCore(coreas1signments, "Core_1", 10000, NULL, 2, &C1, 0);
   //  delay(100);
@@ -1014,32 +971,8 @@ void loop() {
     IPR = 0;
   }
   if (TLY == 1) {
-    switch (Tally) {
-      case 0:
-        leds[0] = CRGB::Black;
-        leds[1] = CRGB::Black;
-        FastLED.show(); break;
-      case 1:
-        leds[0] = CRGB::Blue;
-        leds[1] = CRGB::Blue;
-        FastLED.show(); break;
-      case 2:
-        leds[0] = CRGB::Blue;
-        leds[1] = CRGB::Blue;
-        FastLED.show(); break;
-      case 3:
-        leds[0] = CRGB::Red;
-        leds[1] = CRGB::Red;
-        FastLED.show(); break;
-
-      case 4:
-        leds[0] = CRGB::Black;
-        leds[1] = CRGB::Black;
-        FastLED.show(); break;
-    }
+    SetTallyLed(Tally);
   }
-
-
 
   udpvisca.processPackets();
   listenForVisca();
@@ -1147,10 +1080,7 @@ void loop() {
         delay (200);
         digitalWrite(CAM, LOW);                                //Start camera
         if (TLY == 1) {
-          Tally = 3;                                            //Turn off the tally light
-          leds[0] = CRGB::Red;
-          leds[1] = CRGB::Red;
-          FastLED.show();
+          TurnOffTallyLight();          
         }
         Start_2();
       } else {                                                 //Play Timelapse
@@ -1358,10 +1288,7 @@ void loop() {
       delay (200);
       digitalWrite(CAM, LOW);                                //Start camera
       if (TLY == 1) {
-        Tally = 3;                                            //Turn on the tally light
-        leds[0] = CRGB::Red;
-        leds[1] = CRGB::Red;
-        FastLED.show();
+        TurnOnTallyLight();
       }
       SEQ = 1;
       StorePositions();
@@ -1375,10 +1302,7 @@ void loop() {
       delay (200);
       digitalWrite(CAM, LOW);                                //Start camera
       if (TLY == 1) {
-        Tally = 3;                                            //Turn on the tally light
-        leds[0] = CRGB::Red;
-        leds[1] = CRGB::Red;
-        FastLED.show();
+        TurnOnTallyLight();
       }
       SEQ = 1;
       StorePositions();
@@ -2983,12 +2907,7 @@ void SendNextionValues() {
 
 //*********************************************ARM The Head READY TO START**************************************************
 void Start_1() {
-  // if(PTZ_ID ==5){
-  //        Tally = 0;                                            //Turn off/On the tally light
-  //        leds[0] = CRGB::Black;
-  //        leds[1] = CRGB::Black;
-  //        FastLED.show();
-  // }
+  
   //  Arm the slider to start point ready for second play press
   //logger.print("Entering Start1 ");
   digitalWrite(StepFOC, LOW);                                                                              //Engage the focus motor
@@ -3125,10 +3044,7 @@ void Start_2() {
         digitalWrite(CAM, HIGH);                              //Stop camera
         delay (200);
         digitalWrite(CAM, LOW);
-        Tally = 0;                                            //Turn off the tally light
-        leds[0] = CRGB::Black;
-        leds[1] = CRGB::Black;
-        FastLED.show();
+        TurnOffTallyLight();        
         But_Com = 5;                                          //Tell the nextion to stop the timer
         PT = 1;
         SendNextionValues();
@@ -3143,10 +3059,7 @@ void Start_2() {
       digitalWrite(CAM, HIGH);                                 //Stop camera
       delay (200);
       digitalWrite(CAM, LOW);
-      Tally = 0;                                            //Turn off the tally light
-      leds[0] = CRGB::Black;
-      leds[1] = CRGB::Black;
-      FastLED.show();
+      TurnOffTallyLight();
       But_Com = 5;                                             //Tell the nextion to stop the timer
       PT = 1;
       SendNextionValues();
@@ -5693,10 +5606,7 @@ void  Start_5() {
         digitalWrite(CAM, LOW);
       }
       if (TLYhld == 1 && PTZ_IDhld == 5) {
-        Tally = 0;                                            //Turn off/On the tally light
-        leds[0] = CRGB::Black;
-        leds[1] = CRGB::Black;
-        FastLED.show();
+        TurnOffTallyLight();
       }
 
       BounceActive = 0;
@@ -8598,18 +8508,7 @@ void PTZ_Control() {
     delay (200);
     digitalWrite(CAM, LOW);
     if (TLY == 1) {
-      if (Tally == 0) {
-        Tally = 3;                                                             //Turn off/On the tally light
-        leds[0] = CRGB::Red;
-        leds[1] = CRGB::Red;
-        FastLED.show();
-      } else {
-
-        Tally = 0;                                            //Turn off the tally light
-        leds[0] = CRGB::Black;
-        leds[1] = CRGB::Black;
-        FastLED.show();
-      }
+      ToggleTallyLight();
     }
     lastRecState = Rec;
   }
@@ -9603,171 +9502,28 @@ void ClearKeys() {                                                //Function to 
 }
 
 
-void Percent_100(void) {
-  TCA9548A(4);                          //OLED on bus 4
-  display.clearDisplay();
-  display.setTextSize(1);               // Normal 1:1 pixel scale
-  display.setTextColor(SSD1306_WHITE);  // Draw white text
-  display.setCursor(35, 16);            // Start at top-left corner
-  display.cp437(true);                  // Use full 256 char 'Code Page 437' font
-  if (PTZ_ID == 5) {
-    OLED_ID = 0;
-  } else {
-    OLED_ID = PTZ_ID;
-  }
-  display.printf("ID:%d\n", OLED_ID);
-  display.setTextSize(1);               // Normal 1:1 pixel scale
-  display.setTextColor(SSD1306_WHITE);  // Draw white text
-  display.setCursor(35, 25);            // Start at top-left corner
-  display.cp437(true);                  // Use full 256 char 'Code Page 437' font
-  display.write("100%");
-  display.drawBitmap(
-    (display.width()  - 60 ),
-    (display.height() - 10),
-    logo_bmp4, LOGO_WIDTH, LOGO_HEIGHT, 1);
-  display.display();
-  delay(100);
-}
-
-void Percent_75(void) {
-  TCA9548A(4);                          //OLED on bus 3
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
-  display.setCursor(35, 16);
-  display.cp437(true);
-  if (PTZ_ID == 5) {                 //PTZ ID 0 is actually 5!
-    OLED_ID = 0;
-  } else {
-    OLED_ID = PTZ_ID;
-  }
-  display.printf("ID:%d\n", OLED_ID);
-
-
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
-  display.setCursor(35, 25);
-  display.cp437(true);
-  display.write("75%");
-  //display.println(BatV);
-  display.drawBitmap(
-    (display.width()  - 60 ),
-    (display.height() - 10),
-    logo_bmp3, LOGO_WIDTH, LOGO_HEIGHT, 1);
-  display.display();
-  delay(100);
-}
-
-void Percent_50(void) {
-  TCA9548A(4);                          //OLED on bus 3
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
-  display.setCursor(35, 16);
-  display.cp437(true);
-  if (PTZ_ID == 5) {
-    OLED_ID = 0;
-  } else {
-    OLED_ID = PTZ_ID;
-  }
-  display.printf("ID:%d\n", OLED_ID);
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
-  display.setCursor(35, 25);
-  display.cp437(true);
-  display.write("50%");
-  display.drawBitmap(
-    (display.width()  - 60 ),
-    (display.height() - 10),
-    logo_bmp2, LOGO_WIDTH, LOGO_HEIGHT, 1);
-  display.display();
-  delay(100);
-}
-
-void Percent_25(void) {
-  TCA9548A(4);                          //OLED on bus 3
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
-  display.setCursor(35, 16);
-  display.cp437(true);
-  if (PTZ_ID == 5) {
-    OLED_ID = 0;
-  } else {
-    OLED_ID = PTZ_ID;
-  }
-  display.printf("ID:%d\n", OLED_ID);
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
-  display.setCursor(35, 25);
-  display.cp437(true);
-  display.write("25%");
-  display.drawBitmap(
-    (display.width()  - 60 ),
-    (display.height() - 10),
-    logo_bmp1, LOGO_WIDTH, LOGO_HEIGHT, 1);
-  display.display();
-  delay(100);
-}
-
-void Percent_0(void) {
-  TCA9548A(4);                          //OLED on bus 3
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
-  display.setCursor(35, 16);
-  display.cp437(true);
-  if (PTZ_ID == 5) {
-    OLED_ID = 0;
-  } else {
-    OLED_ID = PTZ_ID;
-  }
-  display.printf("ID:%d\n", OLED_ID);
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
-  display.setCursor(35, 25);
-  display.cp437(true);
-  display.write("0%");
-  display.drawBitmap(
-    (display.width()  - 60 ),
-    (display.height() - 10),
-    logo_bmp1, LOGO_WIDTH, LOGO_HEIGHT, 1);
-  display.display();
-  delay(100);
-}
 void BatCheck() {
   BatV = analogRead(BatPin);
   BatV = ((BatV / 4095) * 2) * 4.182;
   if (BatV > 7.5) {
-    Percent_100();
+    Percent_100(PTZ_ID);
   } else {
     if (BatV > 7.4) {
-      Percent_75();
+      Percent_75(PTZ_ID);
     } else {
       if (BatV > 7.3) {
-        Percent_50();
+        Percent_50(PTZ_ID);
       } else {
         if (BatV > 7.2) {
-          Percent_25();
+          Percent_25(PTZ_ID);
         } else {
-          Percent_0();
+          Percent_0(PTZ_ID);
         }
       }
     }
   }
 }
 
-void Oledmessage() {
-  TCA9548A(4);                          //OLED on bus 3
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
-  display.setCursor(35, 16);
-  display.cp437(true);
-  display.printf("Sld:%d\n", Sld);
-  display.display();
-  delay(2000);
-}
 
 //**********************************Parse VISCA commands**************
 
@@ -9898,13 +9654,8 @@ void parseVISCA() {
     //IP comands
 
     case 14: logger.println("Tally Light Comand");      //Hardware required to control an LED required here This might also be used to trigger on camera recording
-      switch (Tally) {
-        case 0: logger.println("\nTally 0"); break; //Flashing (in prevue)
-        case 1: logger.println("\nTally 1"); break; //Flashing (in prevue)
-        case 2: logger.println("\nTally 2"); break; //Light Always on (Live)
-        case 3: logger.println("\nTally 3"); break; //Normal or (off inactive)
-        case 4: logger.println("\nTally 4"); break; //Normal or (off inactive)
-      }
+      LogTallyLightState(logger);
+      break;
 
     case 665: logger.println("IP1 request");
       sprintf(buffer, "%d\n", IP1 );
