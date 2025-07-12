@@ -780,8 +780,6 @@ void setup() {
   wifiManager.setup();
 
   SetupTallyLed();
-
-
   SetupOled(logger);
   //*************************************Setup a core to run Encoder****************************
   //  xTaskCreatePinnedToCore(coreas1signments, "Core_1", 10000, NULL, 2, &C1, 0);
@@ -10136,52 +10134,63 @@ void Home() {
   }
 }
 
+bool calibrateStepperPosition(char* name,uint sensor, FastAccelStepper *stepper, int speedInHz, int acceleration, int move, int move2){
+  int numberOfZeroDeltas=0;
+  long lastPosition=0;
+  if (digitalRead(sensor) == HIGH) {
+    stepper->setSpeedInHz(speedInHz);                         // Home the tilt
+    stepper->setAcceleration(acceleration);
+    stepper->move(move);
+  }else{
+    logger.printf("\nHall %s sensor already detected at startup, position possibly past detection range", name);
+    return false;
+  }
+  while (digitalRead(sensor) == HIGH) {             // Make the Stepper move CCW until the switch is activated
+    delay(20);   
+    long currentPosition=stepper->getCurrentPosition();
+    long delta=currentPosition-lastPosition;
+    logger.printf("\nStepper %s pos %d (%d)",name, currentPosition,currentPosition-lastPosition);
+    lastPosition=currentPosition;
+    if (delta==0){
+      numberOfZeroDeltas+=1;
+      if (numberOfZeroDeltas>3) {
+        logger.printf("\nMissed hall %s sensor", name);
+        return false; //prevent endless loop on badly positioned head
+      }
+    }
+  }
+  if (digitalRead(sensor) != HIGH) {
+    logger.printf("\nFound hall %s sensor at %ld",name, stepper->getCurrentPosition());
+    stepper->forceStopAndNewPosition(5);                  //Stops dead
+    delay(20);
+    stepper->move(move2);                                // return to level
+    delay(20);
+    while (stepper->isRunning()) {
+      delay(20);
+    }
+    logger.printf("\n%s stepper at new home position, old position %ld",name, stepper->getCurrentPosition());
+
+    stepper->setCurrentPosition(0);  //Set this position as home 0
+    return true;  
+  }
+  else{
+    logger.printf("\nCould not found hall %s sensor at %ld",name, stepper->getCurrentPosition());
+    return false;   
+  }                
+}
+
 void homeStepper() {
-
-  stepper1->setSpeedInHz(1500);                         // Home the tilt
-  stepper1->setAcceleration(700);
-  stepper1->move(8000);
-  while (digitalRead(Hall_Tilt) == HIGH) {             // Make the Stepper move CCW until the switch is activated
-    delay(20);                                         //"MoveTo" move to a position and stop,
+  SetTallyLed(1);
+  bool tilt_ok=calibrateStepperPosition("Tilt", Hall_Tilt, stepper1, 1500, 700, 8000, -1900);
+  bool pan_ok=calibrateStepperPosition("Pan", Hall_Pan,  stepper2,  300, 300, 3000, -700);
+  if (!tilt_ok || !pan_ok){
+     SetTallyLed(3);
   }
-  stepper1->forceStopAndNewPosition(5);                  //Stops dead
-  delay(20);
-  stepper1->move(-1900);                                // return to level
-  delay(20);
-  while (stepper1->isRunning() || stepper2->isRunning()) {
-    delay(20);
+  else {
+    SetTallyLed(0);
   }
-
-  stepper1->setCurrentPosition(0);                       //Set this position as home 0
-  //  T_ResetEncoder = 1;
-  //  Start_T_Encoder();
-  //  //vTaskDelay(20);
-
-
-  stepper2->setSpeedInHz(300);                         // Home the Pan
-  stepper2->setAcceleration(300);
-  stepper2->move(3000);
-  while (digitalRead(Hall_Pan) == HIGH) {
-    delay(10);
-  }
-  stepper2->forceStopAndNewPosition(5);                  //Stops dead
-  delay(20);
-  stepper2->move(-700);
-  delay(20);
-  while (stepper2->isRunning()) {
-    delay(20);
-  }
-
-  stepper2->setCurrentPosition(0);                       //Set this position as home 0
-  //  P_ResetEncoder = 1;
-  //  Start_P_Encoder();
-  //  //vTaskDelay(20);
-
-
 
   SendNextionValues();
-  return;
-
 }
 
 
