@@ -36,8 +36,6 @@ const unsigned char logo_bmp4 [] PROGMEM = {
 
 int OLED_ID;
 
-void TCA9548A(uint8_t bus); // Forward declaration 
-
 void SetupOled(Logger & logger){
   //*************************************Setup OLED****************************
   TCA9548A(4);

@@ -69,7 +69,9 @@
 #include "Logger.h"
 #include "WifiConfigManager.h"
 #include "UDPPacketHandler.h"
+#include "i2c.h"
 #include "oled.h"
+#include "encoders.h"
 
 
 Logger logger;
@@ -304,79 +306,6 @@ int P14_Z = 10;
 int P15_Z = 10;
 int P16_Z = 10;
 
-long F_revolutions = 0;                         // number of revolutions the encoder has made
-long Z_revolutions = 0;                         // number of revolutions the encoder has made
-long P_revolutions = 0;                         // number of revolutions the encoder has made
-long T_revolutions = 0;                         // number of revolutions the encoder has made
-
-long F_E_position = 0;                        // the calculated value the encoder is at
-long Z_E_position = 0;
-long P_E_position = 0;
-long T_E_position = 0;
-
-long F_output;                                // raw value from AS5600
-long Z_output;
-long P_output;
-long T_output;
-
-long F_lastOutput;                              // last output from AS5600
-long Z_lastOutput;
-long P_lastOutput;
-long T_lastOutput;
-
-
-
-long F_E_outputPos = 0;                         // Ajustment value
-long Z_E_outputPos = 0;
-long P_E_outputPos = 0;
-long T_E_outputPos = 0;
-
-
-long F_E_lastOutput;                            // last output from AS5600
-long Z_E_lastOutput;
-long P_E_lastOutput;
-long T_E_lastOutput;
-
-long F_S_position = 0;                          // Number of stepper steps at 16 microsteps/step interpolated by the driver to 256 microsteps/step (confusing!)
-long Z_S_position = 0;
-long P_S_position = 0;
-long T_S_position = 0;
-
-long F_E_Trim = 0;                              // A Trim value for the encoder effectively setting its 0 position to match Step 0 position
-long Z_E_Trim = 0;
-long P_E_Trim = 0;
-long T_E_Trim = 0;
-
-long F_E_Current = 0;
-long Z_E_Current = 0;
-long P_E_Current = 0;
-long T_E_Current = 0;
-
-
-long F_E_Turn = 0;
-long Z_E_Turn = 0;
-long P_E_Turn = 0;
-long T_E_Turn = 0;
-
-long F_E_outputTurn = 0;
-long Z_E_outputTurn = 0;
-long P_E_outputTurn = 0;
-long T_E_outputTurn = 0;
-
-long F_E_outputHold = 32728;
-long Z_E_outputHold = 32728;
-long P_E_outputHold = 32728;
-long T_E_outputHold = 32728;
-
-long F_loopcount = 0;
-long Z_loopcount = 0;
-long P_loopcount = 0;
-long T_loopcount = 0;
-
-long  F_S_lastPosition = 0;
-long  Z_S_lastPosition = 0;
-long  P_S_lastPosition = 0;
-long  T_S_lastPosition = 0;
 
 float factor;
 int Mount = 0;                                 //Is the Mount function active 1 true 0 false
@@ -471,10 +400,6 @@ int Nextion_play;
 int But_Com;
 int TpsM;
 
-int F_ResetEncoder = 1;
-int Z_ResetEncoder = 1;
-int P_ResetEncoder = 1;
-int T_ResetEncoder = 1;
 
 int incomingEz;
 int incomingBo;
@@ -840,10 +765,6 @@ struct_message NextionValues;                             //Define structure for
 struct_message incomingValues;                            //Define structure for receiving values from remote Nextion control
 
 
-AS5600 F_encoder;                                           //AMS AS5600 Encoder setups   The encoders keeps track of motor positiions even when powered down for positioning
-AS5600 Z_encoder;
-AS5600 P_encoder;
-AS5600 T_encoder;
 int WIFIOUT[8];                                           //set up 5 element array for sendinf values to pantilt
 //#define RXD2 16                                           //Hardware Serial2 on ESP32 Dev (must also be a common earth between nextion and esp32)
 //#define TXD2 17
@@ -851,14 +772,6 @@ int WIFIOUT[8];                                           //set up 5 element arr
 TaskHandle_t C1;
 TaskHandle_t C2;
 
-
-// Select I2C BUS
-void TCA9548A(uint8_t bus) {
-  Wire.beginTransmission(0x70);  // TCA9548A address
-  Wire.write(1 << bus);          // send byte to select bus
-  Wire.endTransmission();
-  //logger.print(bus);
-}
 
 
 void setup() {
@@ -1117,15 +1030,15 @@ void loop() {
     delay(20);
     // FS_Limits();
     if (LM == 1) {
-      cam_F_In = (F_S_position);                                      //Set Focus position IN
-      stepper3->setCurrentPosition(F_S_position);
+      cam_F_In = (F_.get_sposition());                                      //Set Focus position IN
+      stepper3->setCurrentPosition(F_.get_sposition());
 
-      cam_Z_In = (Z_S_position);                                      //Set zoom position IN
-      stepper4->setCurrentPosition(Z_S_position);
+      cam_Z_In = (Z_.get_sposition());                                      //Set zoom position IN
+      stepper4->setCurrentPosition(Z_.get_sposition());
       delay(10);
 
-      Forward_T_In = (T_S_position);                                  //Set Tilt position IN
-      stepper1->setCurrentPosition(T_S_position);
+      Forward_T_In = (T_.get_sposition());                                  //Set Tilt position IN
+      stepper1->setCurrentPosition(T_.get_sposition());
 
     }
     SysMemory.begin("FocLmts", false);                              //save to memory
@@ -1141,14 +1054,14 @@ void loop() {
     SysMemory.end();
 
     if (LM == 2) {
-      cam_F_Out = (F_S_position);                                     //Set position OUT
-      stepper3->setCurrentPosition(F_S_position);
+      cam_F_Out = (F_.get_sposition());                                     //Set position OUT
+      stepper3->setCurrentPosition(F_.get_sposition());
       delay(10);
-      cam_Z_Out = (Z_S_position);                                     //Set position OUT
-      stepper4->setCurrentPosition(Z_S_position);
+      cam_Z_Out = (Z_.get_sposition());                                     //Set position OUT
+      stepper4->setCurrentPosition(Z_.get_sposition());
       delay(10);
-      Forward_T_Out = (T_S_position);                                  //Set Tilt position IN
-      stepper1->setCurrentPosition(T_S_position);
+      Forward_T_Out = (T_.get_sposition());                                  //Set Tilt position IN
+      stepper1->setCurrentPosition(T_.get_sposition());
 
     }
     SysMemory.begin("FocLmts", false);                                //save to memory
@@ -1187,7 +1100,7 @@ void loop() {
       stepper1->moveTo(0);                                        //Return the Tilt to home
       delay(10);
 
-      stepper2->setCurrentPosition(P_S_position);                 //Make sure we no where Pan is even though we are not setting its liits here
+      stepper2->setCurrentPosition(P_.get_sposition());                 //Make sure we no where Pan is even though we are not setting its liits here
       stepper2->moveTo(0);                                        //Return the Tilt to home
 
       while (stepper3->isRunning() || stepper4->isRunning() || stepper1->isRunning() || stepper2->isRunning() ) {
@@ -1385,173 +1298,6 @@ void coreas1signments( void * pvParameters ) {
 
 
 
-//*****Focus Encoder
-void Start_F_Encoder() {
-  TCA9548A(0);
-  if (F_ResetEncoder == 1) {
-    //    F_encoder.setDirection(AS5600_CLOCK_WISE);  //  default, just be explicit.
-    //    F_encoder.resetCumulativePosition(0);
-    F_encoder.setZero();
-    //F_encoder.resetPosition();
-    F_lastOutput = 0;
-    F_S_position = 0;
-    F_E_position = 0;
-    F_revolutions = 0;
-    F_ResetEncoder = 0;
-
-  }
-  //F_output = F_encoder.getCumulativePosition() ;
-  F_output = F_encoder.getPosition();           // get the raw value of the encoder
-
-  if ((F_lastOutput - F_output) > 2047 ) {       // check if a full rotation has been made
-    F_revolutions++;
-  }
-  if ((F_lastOutput - F_output) < -2047 ) {
-    F_revolutions--;
-  }
-  F_E_position = F_revolutions * 4096 + F_output;   // calculate the position the the encoder is at based off of the number of revolutions
-
-  //logger.println("Encoder E_Position=");
-  //logger.println(E_position);
-
-  F_lastOutput = F_output;                      // save the last raw value for the next loop
-  F_E_outputPos = F_E_position;
-
-  F_S_position = ((F_E_position / 2.56));       //Ajust encoder to stepper values the number of steps eqiv
-  F_S_position = (F_S_position * 2);            //Ajust encoder to stepper values the number of steps eqiv
-  //logger.println(F_S_position);
-}
-
-//*****Zoom Encoder
-void Start_Z_Encoder() {
-  TCA9548A(2);
-  if (Z_ResetEncoder == 1) {
-    //    Z_encoder.setDirection(AS5600_CLOCK_WISE);  //  default, just be explicit.
-    //    Z_encoder.resetCumulativePosition(0);
-    Z_encoder.setZero();
-    //Z_encoder.resetPosition();
-    Z_lastOutput = 0;
-    Z_S_position = 0;
-    Z_E_position = 0;
-    Z_revolutions = 0;
-    Z_ResetEncoder = 0;
-
-  }
-  //Z_output = Z_encoder.getCumulativePosition() ;
-  Z_output = Z_encoder.getPosition();           // get the raw value of the encoder
-
-  if ((Z_lastOutput - Z_output) > 2047 ) {       // check if a full rotation has been made
-    Z_revolutions++;
-  }
-  if ((Z_lastOutput - Z_output) < -2047 ) {
-    Z_revolutions--;
-  }
-  Z_E_position = Z_revolutions * 4096 + Z_output;   // calculate the position the the encoder is at based off of the number of revolutions
-
-  //logger.println("Encoder E_Position=");
-  //logger.println(E_position);
-
-  Z_lastOutput = Z_output;                      // save the last raw value for the next loop
-  Z_E_outputPos = Z_E_position;
-
-  Z_S_position = ((Z_E_position / 2.56));       //Ajust encoder to stepper values the number of steps eqiv
-  Z_S_position = (Z_S_position * 2);            //Ajust encoder to stepper values the number of steps eqiv
-  //logger.println(Z_S_position);
-}
-
-
-//*******Tilt Encoder
-void Start_T_Encoder() {
-  TCA9548A(1);
-  if (T_ResetEncoder == 1) {
-    //    T_encoder.setDirection(AS5600_CLOCK_WISE);  //  default, just be explicit.
-    //    T_encoder.resetCumulativePosition(0);
-    T_encoder.setZero();
-    //T_encoder.resetPosition();
-    T_lastOutput = 0;
-    T_S_position = 0;
-    T_E_position = 0;
-    T_revolutions = 0;
-    T_ResetEncoder = 0;
-
-  }
-  //T_output = T_encoder.getCumulativePosition() ;
-  T_output = T_encoder.getPosition();           // get the raw value of the encoder
-
-  if ((T_lastOutput - T_output) > 2047 ) {       // check if a full rotation has been made
-    T_revolutions++;
-  }
-  if ((T_lastOutput - T_output) < -2047 ) {
-    T_revolutions--;
-  }
-  T_E_position = T_revolutions * 4096 + T_output;   // calculate the position the the encoder is at based off of the number of revolutions
-
-  //logger.println("Encoder E_Position=");
-  //logger.println(E_position);
-
-  T_lastOutput = T_output;                      // save the last raw value for the next loop
-  T_E_outputPos = T_E_position;
-
-  T_S_position = ((T_E_position / 2.56));       //Ajust encoder to stepper values the number of steps eqiv
-
-
-  //logger.println(P_S_position);
-  T_S_position = (T_S_position * 5.18);            //Ajust for gear ratio 5.18:1 which is to fast for the encoder on the!
-  //******This is required if the motor is geared and the encoder is NOT on the back of the motor. (The AS5600 canot keep up with the fast moving motor) *****************
-
-  if (T_output < 0) {                               //Reverse the values for the encoder position
-    T_S_position = abs(T_S_position);
-  } else {
-    T_S_position = T_S_position - (T_S_position * 2);
-
-  }
-  //***************************************************************************************************************
-
-}
-
-//*******Pan Encoder
-void Start_P_Encoder() {
-  TCA9548A(3);
-  if (P_ResetEncoder == 1) {
-    //    P_encoder.setDirection(AS5600_CLOCK_WISE);  //  default, just be explicit.
-    //    P_encoder.resetCumulativePosition(0);
-    P_encoder.setZero();
-    //P_encoder.resetPosition();
-    P_lastOutput = 0;
-    P_S_position = 0;
-    P_E_position = 0;
-    P_revolutions = 0;
-    P_ResetEncoder = 0;
-
-  }
-  //P_output = P_encoder.getCumulativePosition() ;
-  //P_output = P_encoder.rawAngle() ;
-  P_output = P_encoder.getPosition();           // get the raw value of the encoder
-
-  if ((P_lastOutput - P_output) > 2047 ) {       // check if a full rotation has been made
-    P_revolutions++;
-  }
-  if ((P_lastOutput - P_output) < -2047 ) {
-    P_revolutions--;
-  }
-  P_E_position = P_revolutions * 4096 + P_output;   // calculate the position the the encoder is at based off of the number of revolutions
-
-  //logger.println("Encoder E_Position=");
-  //logger.println(E_position);
-
-  P_lastOutput = P_output;                      // save the last raw value for the next loop
-  P_E_outputPos = P_E_position;
-
-  P_S_position = ((P_E_position / 2.56));       //Ajust encoder to stepper values the number of steps eqiv
-  // P_S_position = (P_S_position * 2);            //Ajust encoder to stepper values the number of steps eqiv
-  //logger.println(P_S_position);
-  // if (P_output < 0) {                               //Reverse the values for the encoder position
-  //    P_S_position = abs(P_S_position);
-  //  } else {
-  //    P_S_position = P_S_position - (P_S_position * 2);
-  //
-  //  }
-}
 //*********************************************************INpoint set*************************************
 void INpointSet() {
   // Buttonset = 1;
@@ -1605,16 +1351,16 @@ void INpointSet() {
     case 2:                                                             //Second inpoint press take the encoder values and set as inpoint
       //TLTin_position = stepper1->getCurrentPosition();                //original code without Encoders
       //PANin_position = stepper2->getCurrentPosition();
-      TLTin_position = (T_S_position);
-      PANin_position = (P_S_position);
-      FOCin_position = (F_S_position);                                  //Only the Focus motor has an encoder this is getting the value from the encoder
-      ZMin_position = (Z_S_position);
+      TLTin_position = (T_.get_sposition());
+      PANin_position = (P_.get_sposition());
+      FOCin_position = (F_.get_sposition());                                  //Only the Focus motor has an encoder this is getting the value from the encoder
+      ZMin_position = (Z_.get_sposition());
 
 
-      stepper1->setCurrentPosition(T_S_position);
-      stepper2->setCurrentPosition(P_S_position);
-      stepper3->setCurrentPosition(F_S_position);
-      stepper4->setCurrentPosition(Z_S_position);
+      stepper1->setCurrentPosition(T_.get_sposition());
+      stepper2->setCurrentPosition(P_.get_sposition());
+      stepper3->setCurrentPosition(F_.get_sposition());
+      stepper4->setCurrentPosition(Z_.get_sposition());
 
       InP = 0;
       delay(10);
@@ -1683,10 +1429,10 @@ void OUTpointSet() {
     case 2:                                                           //Second outpoint press take the encoder values and set as inpoint
       //      TLTout_position = stepper1->getCurrentPosition();                //Original code withought encoders
       //      PANout_position = stepper2->getCurrentPosition();
-      TLTout_position = (T_S_position);
-      PANout_position = (P_S_position);
-      FOCout_position = (F_S_position);
-      ZMout_position = (Z_S_position);
+      TLTout_position = (T_.get_sposition());
+      PANout_position = (P_.get_sposition());
+      FOCout_position = (F_.get_sposition());
+      ZMout_position = (Z_.get_sposition());
 
       stepper1->setCurrentPosition(TLTout_position);
       stepper2->setCurrentPosition(PANout_position);
@@ -2257,10 +2003,10 @@ void k1set() {
       break;
 
     case 2:                                                            //Second press take the encoder values and set as new position
-      Tlt_k1_position = (T_S_position);                                //Burn in positions
-      Pan_k1_position = (P_S_position);
-      Foc_k1_position = (F_S_position);
-      Zoo_k1_position = (Z_S_position);
+      Tlt_k1_position = (T_.get_sposition());                                //Burn in positions
+      Pan_k1_position = (P_.get_sposition());
+      Foc_k1_position = (F_.get_sposition());
+      Zoo_k1_position = (Z_.get_sposition());
 
       SysMemory.begin("k1_pos", false);                               //save to memory
       SysMemory.putUInt("Tlt_k1_pos", Tlt_k1_position);
@@ -2270,10 +2016,10 @@ void k1set() {
       SysMemory.end();
 
 
-      stepper1->setCurrentPosition(T_S_position);
-      stepper2->setCurrentPosition(P_S_position);
-      stepper3->setCurrentPosition(F_S_position);
-      stepper4->setCurrentPosition(Z_S_position);
+      stepper1->setCurrentPosition(T_.get_sposition());
+      stepper2->setCurrentPosition(P_.get_sposition());
+      stepper3->setCurrentPosition(F_.get_sposition());
+      stepper4->setCurrentPosition(Z_.get_sposition());
       P1 = 0;
       digitalWrite(StepFOC, LOW);                                     //Power UP the steppers
       digitalWrite(StepD, LOW);
@@ -2326,10 +2072,10 @@ void k2set() {
       break;
 
     case 2:                                                            //Second press take the encoder values and set as new position
-      Tlt_k2_position = (T_S_position);               //Burn in positions
-      Pan_k2_position = (P_S_position);
-      Foc_k2_position = (F_S_position);
-      Zoo_k2_position = (Z_S_position);
+      Tlt_k2_position = (T_.get_sposition());               //Burn in positions
+      Pan_k2_position = (P_.get_sposition());
+      Foc_k2_position = (F_.get_sposition());
+      Zoo_k2_position = (Z_.get_sposition());
 
       SysMemory.begin("k2_pos", false);                               //save to memory
       SysMemory.putUInt("Tlt_k2_pos", Tlt_k2_position);
@@ -2338,10 +2084,10 @@ void k2set() {
       SysMemory.putUInt("Zoo_k2_pos", Zoo_k2_position);
       SysMemory.end();
 
-      stepper1->setCurrentPosition(T_S_position);
-      stepper2->setCurrentPosition(P_S_position);
-      stepper3->setCurrentPosition(F_S_position);
-      stepper4->setCurrentPosition(Z_S_position);
+      stepper1->setCurrentPosition(T_.get_sposition());
+      stepper2->setCurrentPosition(P_.get_sposition());
+      stepper3->setCurrentPosition(F_.get_sposition());
+      stepper4->setCurrentPosition(Z_.get_sposition());
       P2 = 0;
       digitalWrite(StepFOC, LOW);                                     //Power UP the Focus stepper
       digitalWrite(StepD, LOW);
@@ -2394,10 +2140,10 @@ void k3set() {
       break;
 
     case 2:                                                            //Second press take the encoder values and set as new position
-      Tlt_k3_position = (T_S_position);               //Burn in positions
-      Pan_k3_position = (P_S_position);
-      Foc_k3_position = (F_S_position);
-      Zoo_k3_position = (Z_S_position);
+      Tlt_k3_position = (T_.get_sposition());               //Burn in positions
+      Pan_k3_position = (P_.get_sposition());
+      Foc_k3_position = (F_.get_sposition());
+      Zoo_k3_position = (Z_.get_sposition());
 
       SysMemory.begin("k3_pos", false);                               //save to memory
       SysMemory.putUInt("Tlt_k3_pos", Tlt_k3_position);
@@ -2407,10 +2153,10 @@ void k3set() {
       SysMemory.end();
 
 
-      stepper1->setCurrentPosition(T_S_position);
-      stepper2->setCurrentPosition(P_S_position);
-      stepper3->setCurrentPosition(F_S_position);
-      stepper4->setCurrentPosition(Z_S_position);
+      stepper1->setCurrentPosition(T_.get_sposition());
+      stepper2->setCurrentPosition(P_.get_sposition());
+      stepper3->setCurrentPosition(F_.get_sposition());
+      stepper4->setCurrentPosition(Z_.get_sposition());
       P3 = 0;
       digitalWrite(StepFOC, LOW);                                     //Power UP the Focus stepper
       digitalWrite(StepD, LOW);
@@ -2462,10 +2208,10 @@ void k4set() {
       break;
 
     case 2:                                                            //Second press take the encoder values and set as new position
-      Tlt_k4_position = (T_S_position);                                //Burn in positions
-      Pan_k4_position = (P_S_position);
-      Foc_k4_position = (F_S_position);
-      Zoo_k4_position = (Z_S_position);
+      Tlt_k4_position = (T_.get_sposition());                                //Burn in positions
+      Pan_k4_position = (P_.get_sposition());
+      Foc_k4_position = (F_.get_sposition());
+      Zoo_k4_position = (Z_.get_sposition());
       SysMemory.begin("k4_pos", false);                               //save to memory
       SysMemory.putUInt("Tlt_k4_pos", Tlt_k4_position);
       SysMemory.putUInt("Pan_k4_pos", Pan_k4_position);
@@ -2473,10 +2219,10 @@ void k4set() {
       SysMemory.putUInt("Zoo_k4_pos", Zoo_k4_position);
       SysMemory.end();
 
-      stepper1->setCurrentPosition(T_S_position);
-      stepper2->setCurrentPosition(P_S_position);
-      stepper3->setCurrentPosition(F_S_position);
-      stepper4->setCurrentPosition(Z_S_position);
+      stepper1->setCurrentPosition(T_.get_sposition());
+      stepper2->setCurrentPosition(P_.get_sposition());
+      stepper3->setCurrentPosition(F_.get_sposition());
+      stepper4->setCurrentPosition(Z_.get_sposition());
       P4 = 0;
 
       digitalWrite(StepFOC, LOW);                                     //Power UP the Focus stepper
@@ -2531,10 +2277,10 @@ void k5set() {
       break;
 
     case 2:                                                            //Second press take the encoder values and set as new position
-      Tlt_k5_position = (T_S_position);                                //Burn in positions
-      Pan_k5_position = (P_S_position);
-      Foc_k5_position = (F_S_position);
-      Zoo_k5_position = (Z_S_position);
+      Tlt_k5_position = (T_.get_sposition());                                //Burn in positions
+      Pan_k5_position = (P_.get_sposition());
+      Foc_k5_position = (F_.get_sposition());
+      Zoo_k5_position = (Z_.get_sposition());
 
       SysMemory.begin("k5_pos", false);                               //save to memory
       SysMemory.putUInt("Tlt_k5_pos", Tlt_k5_position);
@@ -2544,10 +2290,10 @@ void k5set() {
       SysMemory.end();
 
 
-      stepper1->setCurrentPosition(T_S_position);
-      stepper2->setCurrentPosition(P_S_position);
-      stepper3->setCurrentPosition(F_S_position);
-      stepper4->setCurrentPosition(Z_S_position);
+      stepper1->setCurrentPosition(T_.get_sposition());
+      stepper2->setCurrentPosition(P_.get_sposition());
+      stepper3->setCurrentPosition(F_.get_sposition());
+      stepper4->setCurrentPosition(Z_.get_sposition());
       P5 = 0;
 
 
@@ -2602,10 +2348,10 @@ void k6set() {
       break;
 
     case 2:                                                            //Second press take the encoder values and set as new position
-      Tlt_k6_position = (T_S_position);                                //Burn in positions
-      Pan_k6_position = (P_S_position);
-      Foc_k6_position = (F_S_position);
-      Zoo_k6_position = (Z_S_position);
+      Tlt_k6_position = (T_.get_sposition());                                //Burn in positions
+      Pan_k6_position = (P_.get_sposition());
+      Foc_k6_position = (F_.get_sposition());
+      Zoo_k6_position = (Z_.get_sposition());
       SysMemory.begin("k6_pos", false);                               //save to memory
       SysMemory.putUInt("Tlt_k6_pos", Tlt_k6_position);
       SysMemory.putUInt("Pan_k6_pos", Pan_k6_position);
@@ -2613,10 +2359,10 @@ void k6set() {
       SysMemory.putUInt("Zoo_k6_pos", Zoo_k6_position);
       SysMemory.end();
 
-      stepper1->setCurrentPosition(T_S_position);
-      stepper2->setCurrentPosition(P_S_position);
-      stepper3->setCurrentPosition(F_S_position);
-      stepper4->setCurrentPosition(Z_S_position);
+      stepper1->setCurrentPosition(T_.get_sposition());
+      stepper2->setCurrentPosition(P_.get_sposition());
+      stepper3->setCurrentPosition(F_.get_sposition());
+      stepper4->setCurrentPosition(Z_.get_sposition());
       P6 = 0;
 
 
@@ -5894,14 +5640,14 @@ void InitialValues() {
   tilt_AVG = temp_tilt / 50;
   pan_AVG = temp_pan / 50;
   stepper3->setCurrentPosition(0);
-  F_ResetEncoder = 1;
+  F_.ResetEncoder();
   stepper4->setCurrentPosition(0);
-  Z_ResetEncoder = 1;
+  Z_.ResetEncoder();
 
   stepper1->setCurrentPosition(0);
-  T_ResetEncoder = 1;
+  T_.ResetEncoder();
   stepper2->setCurrentPosition(0);
-  P_ResetEncoder = 1;
+  P_.ResetEncoder();
 
   return;
 }
@@ -9493,10 +9239,10 @@ void ClearKeys() {                                                //Function to 
   SysMemory.end();
 
   clrK = 0;
-  T_ResetEncoder = 1;
-  P_ResetEncoder = 1;
-  F_ResetEncoder = 1;
-  Z_ResetEncoder = 1;
+  T_.ResetEncoder();
+  P_.ResetEncoder();
+  F_.ResetEncoder();
+  Z_.ResetEncoder();
 
 
 }
@@ -10476,7 +10222,7 @@ void End_V_Limits() {
   stepper1->moveTo(0);                                        //Return the Tilt to home
   delay(10);
 
-  stepper2->setCurrentPosition(P_S_position);                 //Make sure we no where Pan is even though we are not setting its liits here
+  stepper2->setCurrentPosition(P_.get_sposition());                 //Make sure we no where Pan is even though we are not setting its liits here
   stepper2->moveTo(0);                                        //Return the Tilt to home
 
   while (stepper3->isRunning() || stepper4->isRunning() || stepper1->isRunning() || stepper2->isRunning() ) {
