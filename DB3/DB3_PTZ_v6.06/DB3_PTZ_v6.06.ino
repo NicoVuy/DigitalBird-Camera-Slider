@@ -127,8 +127,6 @@ FastAccelStepper *stepper4 = NULL;
 //int T_Rev = 0;
 int VLM;                                      //Used by VISCA to set limits
 long BD = 1000;                                 //Bounce / Return delay
-int ZTest;
-int FTest;
 int Pan_Stop;
 int Tilt_Stop;
 int Forward_P_Out = 3700;                   //Pan & Tilt limits
@@ -1247,48 +1245,24 @@ void loop() {
 
 //*********************************************************Start Enoders*************************************
 
-void checkEncoders() {                                              //This function checks to see if the zoom and or Focus motors are available before running the encoder script for them
-  TCA9548A(0);
-  Wire.beginTransmission(0x36); //connect to the sensor
-  Wire.write(0x0B); //figure 21 - register map: Status: MD ML MH
-  Wire.endTransmission(); //end transmission
-  Wire.requestFrom(0x36, 1); //request from the sensor
-  if (Wire.available() == 0) {
-    FTest = 0;
-    logger.println("Focus encoder unavailable");
-  } else {
-    FTest = 1;
-    logger.println("Focus encoder found");
-  }
-
-
-  TCA9548A(2);
-  Wire.beginTransmission(0x36); //connect to the sensor
-  Wire.write(0x0B); //figure 21 - register map: Status: MD ML MH
-  Wire.endTransmission(); //end transmission
-  Wire.requestFrom(0x36, 1); //request from the sensor
-  if (Wire.available() == 0) {
-    ZTest = 0;
-    logger.println("Zoom encoder unavailable");
-  } else {
-    ZTest = 1;
-    logger.println("Zoom encoder found");
-  }
+void checkEncoders(){
+  F_.checkEncoder(logger);
+  Z_.checkEncoder(logger);
+  T_.checkEncoder(logger);
+  P_.checkEncoder(logger);
 }
-
-
 
 void coreas1signments( void * pvParameters ) {
   for (;;) {
 
-    if (FTest == 1) {
-      Start_F_Encoder();
+    if (F_.IsOperational()) {
+      F_.Start_Encoder();
     }
-    if (ZTest == 1) {
-      Start_Z_Encoder();
+    if (Z_.IsOperational()) {
+      Z_.Start_Encoder();
     }
-    Start_T_Encoder();
-    Start_P_Encoder();
+    T_.Start_Encoder();
+    P_.Start_Encoder();
     vTaskDelay(10);
     BatCheck();
   };
@@ -10134,7 +10108,7 @@ void Home() {
   }
 }
 
-bool calibrateStepperPosition(char* name,uint sensor, FastAccelStepper *stepper, int speedInHz, int acceleration, int move, int move2){
+bool calibrateStepperPosition(char* name,uint sensor, FastAccelStepper *stepper, int speedInHz, int acceleration, int move, int move2, EncoderState &encoder){
   int numberOfZeroDeltas=0;
   long lastPosition=0;
   if (digitalRead(sensor) == HIGH) {
@@ -10148,8 +10122,9 @@ bool calibrateStepperPosition(char* name,uint sensor, FastAccelStepper *stepper,
   while (digitalRead(sensor) == HIGH) {             // Make the Stepper move CCW until the switch is activated
     delay(20);   
     long currentPosition=stepper->getCurrentPosition();
+    long encoderPosition=encoder.getRawPosition();
     long delta=currentPosition-lastPosition;
-    logger.printf("\nStepper %s pos %d (%d)",name, currentPosition,currentPosition-lastPosition);
+    logger.printf("\nStepper %s pos %d (%d) corresponding encoder at %d",name, currentPosition,currentPosition-lastPosition, encoderPosition);
     lastPosition=currentPosition;
     if (delta==0){
       numberOfZeroDeltas+=1;
@@ -10181,8 +10156,8 @@ bool calibrateStepperPosition(char* name,uint sensor, FastAccelStepper *stepper,
 
 void homeStepper() {
   SetTallyLed(1);
-  bool tilt_ok=calibrateStepperPosition("Tilt", Hall_Tilt, stepper1, 1500, 700, 8000, -1900);
-  bool pan_ok=calibrateStepperPosition("Pan", Hall_Pan,  stepper2,  300, 300, 3000, -700);
+  bool tilt_ok=calibrateStepperPosition("Tilt", Hall_Tilt, stepper1, 1500, 700, 8000, -1900, T_);
+  bool pan_ok=calibrateStepperPosition("Pan", Hall_Pan,  stepper2,  300, 300, 3000, -700, P_);
   if (!tilt_ok || !pan_ok){
      SetTallyLed(3);
   }
