@@ -7,6 +7,7 @@
 #include <ESPmDNS.h>
 #include <Preferences.h>
 #include <esp_now.h>
+#include "coap_server.h"
 
 
 
@@ -14,6 +15,7 @@ class WiFiConfigManager {
 private:
   enum class Mode { Station, AP, ESPNOW };
   WebServer server;
+  CoapServer coap_server;
   Preferences preferences;
   String ssid;
   String password;
@@ -103,6 +105,7 @@ private:
       server.begin();
       serverActive = true;
       logger.println("Web server started successfully.");
+      coap_server.begin();
     }
   }
 
@@ -114,6 +117,7 @@ private:
       server.close();
       serverActive = false;
       logger.println("Web server stopped.");
+      coap_server.end();
     }
   }
 
@@ -239,20 +243,62 @@ private:
 public:
   WiFiConfigManager(esp_now_recv_cb_t receiveCb, esp_now_send_cb_t sendCb, Logger& log)
     : server(80), ssid(""), password(""), currentMode(Mode::AP), serverActive(false),
-      receiveCallback(receiveCb), sentCallback(sendCb), logger(log) {
+      receiveCallback(receiveCb), sentCallback(sendCb), logger(log), coap_server(log) {
   
+  }
+
+  bool initiate_wifi(unsigned long timeoutMs = 20000){
+    unsigned long startTime = millis();
+
+    while (true) {
+      int status = WiFi.status();
+      switch (status) {
+        case WL_CONNECTED:
+          logger.printf("\nWiFi successfully connected");
+          return true;
+
+        case WL_NO_SSID_AVAIL:
+          logger.printf("\nSSID not found");
+          return false;
+
+        case WL_CONNECT_FAILED:
+          logger.printf("\nConnection failed (e.g., wrong password)");
+          return false;
+
+        case WL_NO_SHIELD:
+          logger.printf("\nNo WiFi hardware detected");
+          return false;
+
+        case WL_IDLE_STATUS:
+          logger.printf("\nWiFi idle");
+          break;
+        case WL_DISCONNECTED:
+          logger.printf("\nWiFi disconnected");
+          break;
+        case WL_SCAN_COMPLETED:
+          logger.printf("\nWiFi scan completed");
+          break;
+
+        default:
+          logger.printf("\nUnknown WiFi status: %d ", status);
+          break;
+      }
+
+      if (millis() - startTime >= timeoutMs) {
+        logger.printf("\nWiFi connection timed out");
+        return false;
+      }
+
+      delay(500);
+      logger.print("...");
+    }
   }
 
   void start_station_mode(){
     WiFi.mode(WIFI_STA);
     logger.printf("Attempting to connect to SSID: %s\n", ssid);
     WiFi.begin(ssid.c_str(), password.c_str());
-    int attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 20) {
-      delay(500);
-      logger.println("Waiting for Wifi connection...");
-      attempts++;
-    }
+    initiate_wifi();
     if (WiFi.status() == WL_CONNECTED) {
       logger.printf("Connected to WiFi. IP: {%s}\n", WiFi.localIP().toString().c_str());
       initESPNOW();
@@ -332,7 +378,8 @@ public:
 
   void setup() {
     logger.println("Starting ESP32 WiFi Configuration...");
-    loadSettings();
+    set_default_ap_settings();
+    //loadSettings();
 
     String hostname = ssid;
     
@@ -360,6 +407,7 @@ public:
   void loop() {
     if (serverActive) {
       server.handleClient();
+      coap_server.loop();
     }
     
   }

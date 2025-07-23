@@ -67,6 +67,7 @@
 #include <Adafruit_SSD1306.h>
 #include <HardwareSerial.h>
 #include "Logger.h"
+#include "coap_server.h" 
 #include "WifiConfigManager.h"
 #include "UDPPacketHandler.h"
 #include "i2c.h"
