@@ -105,7 +105,7 @@ private:
     };
     
     int16_t pan=stepper2->getCurrentPosition();
-    int16_t tilt=stepper1->getCurrentPosition();
+    int16_t tilt=-stepper1->getCurrentPosition(); 
 
     // Encode panPosition (range -7000 to +7000) into 4 bytes, big-endian, lower nibble
     response[2] = (pan >> 12) & 0x0F; // Most significant nibble
