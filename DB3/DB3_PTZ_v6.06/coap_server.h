@@ -40,11 +40,20 @@ public:
         }
     }
 
+    // Function to get the current IP address
+    IPAddress getCurrentIP() {
+        if (WiFi.getMode() == WIFI_AP_STA && WiFi.status() == WL_CONNECTED) {
+            return WiFi.localIP(); // STA IP if connected
+        }
+        return WiFi.softAPIP(); // AP IP as fallback
+    }
+
     void callback_discovery(CoapPacket &packet, IPAddress ip, int port) {
         logger.println("Received CoAP request, responding...");
         if (packet.code == COAP_GET) {
         logger.println("Received CoAP discovery request, responding...");
-        const char* payload = "</gimbal>;title=\"DigitalBird DB3 Wifi\";rt=\"gimbal\";if=\"VISCA\";ct=0";
+        char payload[512];
+        snprintf(payload, sizeof(payload), "</gimbal>;title=\"DigitalBird DB3 Wifi\";rt=\"gimbal\";if=\"VISCA\";ct=0;anchor=\"visca://%s:%d\"", getCurrentIP().toString().c_str(),GetUdpViscaPort()  );
         coap.sendResponse(ip, port, packet.messageid, payload, strlen(payload),
                             COAP_CONTENT, COAP_APPLICATION_LINK_FORMAT, packet.token, packet.tokenlen);
         } else {

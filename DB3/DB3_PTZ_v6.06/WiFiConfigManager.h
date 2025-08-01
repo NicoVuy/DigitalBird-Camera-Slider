@@ -16,6 +16,7 @@ private:
   enum class Mode { Station, AP, ESPNOW };
   WebServer server;
   CoapServer coap_server;
+  UDPViscaHandler& visca;
   Preferences preferences;
   String ssid;
   String password;
@@ -106,6 +107,7 @@ private:
       serverActive = true;
       logger.println("Web server started successfully.");
       coap_server.begin();
+      visca.begin();
     }
   }
 
@@ -241,9 +243,9 @@ private:
   }
 
 public:
-  WiFiConfigManager(esp_now_recv_cb_t receiveCb, esp_now_send_cb_t sendCb, Logger& log)
+  WiFiConfigManager(esp_now_recv_cb_t receiveCb, esp_now_send_cb_t sendCb, Logger& log, UDPViscaHandler& visca_handler)
     : server(80), ssid(""), password(""), currentMode(Mode::AP), serverActive(false),
-      receiveCallback(receiveCb), sentCallback(sendCb), logger(log), coap_server(log) {
+      receiveCallback(receiveCb), sentCallback(sendCb), logger(log), coap_server(log), visca(visca_handler) {
   
   }
 
@@ -404,12 +406,13 @@ public:
     }
   }
 
-  void loop() {
+  bool loop() {
     if (serverActive) {
       server.handleClient();
       coap_server.loop();
+      return visca.processPackets();
     }
-    
+    return false;    
   }
 };
 

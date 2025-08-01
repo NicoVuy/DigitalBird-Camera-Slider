@@ -67,9 +67,11 @@
 #include <Adafruit_SSD1306.h>
 #include <HardwareSerial.h>
 #include "Logger.h"
+uint16_t GetUdpViscaPort();
 #include "coap_server.h" 
+#include "UDPViscaHandler.h"
 #include "WifiConfigManager.h"
-#include "UDPPacketHandler.h"
+
 #include "i2c.h"
 #include "oled.h"
 #include "encoders.h"
@@ -79,7 +81,7 @@ Logger logger;
 
 #include "tallyled.h"
 
-WiFiConfigManager wifiManager(&receiveCallback, &sentCallback, logger);
+
 
 HardwareSerial UARTport(2); // use UART2 for VISCA comumication
 
@@ -191,7 +193,11 @@ int Joy_Zoo_Accel;
 int Focus_Stop;
 int Zoo_Stop;
 
-UDPPacketHandler udpvisca(&Joy_Pan_Speed, &Joy_Pan_Accel, &Joy_Tilt_Speed, &Joy_Tilt_Accel, logger, Home, Stop);
+void Home(); 
+void Stop();
+
+UDPViscaHandler udpvisca(&Joy_Pan_Speed, &Joy_Pan_Accel, &Joy_Tilt_Speed, &Joy_Tilt_Accel, logger, Home, Stop, GetUdpViscaPort);
+WiFiConfigManager wifiManager(&receiveCallback, &sentCallback, logger, udpvisca);
 
 int Rec;                                      //Record request 0 -1
 int lastRecState;                             //Last Record button state for camera
@@ -657,6 +663,11 @@ int IP3 = 137;
 int IP4 = 80;
 int IPGW = 1;        //IP gatway 4th position
 long UDP = 1259;
+uint16_t GetUdpViscaPort(){
+  return (uint16_t) UDP;
+}
+
+
 int LastViscaComand;
 int VPanSpeed;
 int VTiltSpeed;
@@ -858,7 +869,7 @@ void setup() {
   delay(100);
   disableCore1WDT();
 
-  udpvisca.begin(stepper1, stepper2);
+  udpvisca.configure(stepper1, stepper2);
 
   delay(2000);
 
@@ -869,7 +880,11 @@ void setup() {
 
 
 void loop() {
-  wifiManager.loop();
+  if (wifiManager.loop())
+  {
+    PTZ_Cam = PTZ_ID; //force PTZ control because movement command received over udp
+  }
+
   //TA=20;
   //PA=20;
   //FA=20;
@@ -884,7 +899,6 @@ void loop() {
     SetTallyLed(Tally);
   }
 
-  udpvisca.processPackets();
   listenForVisca();
 
   //IF the Jib is present then make sure that the ease value is at least 1 for all moves.
@@ -898,7 +912,7 @@ void loop() {
   }
   //logger.printf("PTZ_CAM is set to: %d \n", PTZ_Cam);
   //logger.printf("PTZ_ID is set to: %d \n", PTZ_ID);
-  //logger.printf("LM is set to: %d \n", LM);
+  //logger.printf("LM is set to: %d  usejoy %d \n", LM, usejoy);
   //delay(1000);
   if ((PTZ_Cam == PTZ_ID)  && LM == 0) {
     PTZ_Control();
