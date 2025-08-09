@@ -7,6 +7,7 @@
 #include <ESPmDNS.h>
 #include <Preferences.h>
 #include <esp_now.h>
+#include <ArduinoOTA.h>
 #include "coap_server.h"
 
 class WiFiConfigManager {
@@ -26,6 +27,7 @@ private:
   bool espnowActive;
   bool serverActive;
   bool config_applied;
+  bool otaEnabled;
   unsigned long loop_counter;
   esp_now_recv_cb_t receiveCallback;
   esp_now_send_cb_t sentCallback;
@@ -45,6 +47,7 @@ private:
     preferences.putBool("stationEnabled", stationEnabled);
     preferences.putBool("apEnabled", apEnabled);
     preferences.putBool("espnowEnabled", espnowEnabled);
+    preferences.putBool("otaEnabled", otaEnabled);
     if (stationEnabled) {
       preferences.putString("station_ssid", station_ssid);
       preferences.putString("station_password", station_password);
@@ -60,8 +63,9 @@ private:
     logger.println("Loading WiFi settings from NVRAM...");
     preferences.begin("wifi-config", true);
     stationEnabled = preferences.getBool("stationEnabled", false);
-    apEnabled = preferences.getBool("apEnabled", true); // Default to AP for fallback
+    apEnabled = preferences.getBool("apEnabled", true);
     espnowEnabled = preferences.getBool("espnowEnabled", false);
+    otaEnabled = preferences.getBool("otaEnabled", false);
     if (stationEnabled) {
       station_ssid = preferences.getString("station_ssid", "");
       station_password = preferences.getString("station_password", "");
@@ -76,7 +80,6 @@ private:
     logger.printf("Settings loaded:  %s\n", status.c_str());
   }
 
-
   void initESPNOW() {
     logger.println("Initializing ESP-NOW...");
     if (esp_now_init() == ESP_OK) {
@@ -87,13 +90,42 @@ private:
       if (sentCallback) {
         esp_now_register_send_cb(sentCallback);
       }
-      espnowActive=true;
+      espnowActive = true;
     } else {
       logger.println("ESPNow Init Failed, falling back to AP only mode...");
       apEnabled = true;
       stationEnabled = false;
       espnowEnabled = false;
     }
+  }
+
+  void initOTA() {
+    if (!otaEnabled) return;
+    
+    ArduinoOTA.setHostname(getUniqueName().c_str());
+    ArduinoOTA.setPassword(ap_password.c_str());
+
+    ArduinoOTA.onStart([]() {
+      String type = (ArduinoOTA.getCommand() == U_FLASH) ? "sketch" : "filesystem";
+      Serial.println("Start updating " + type);
+    });
+    ArduinoOTA.onEnd([]() {
+      Serial.println("\nEnd");
+    });
+    ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+      Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+    });
+    ArduinoOTA.onError([](ota_error_t error) {
+      Serial.printf("Error[%u]: ", error);
+      if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
+      else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
+      else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
+      else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
+      else if (error == OTA_END_ERROR) Serial.println("End Failed");
+    });
+
+    ArduinoOTA.begin();
+    logger.println("OTA initialized");
   }
 
   void startServer() {
@@ -105,6 +137,9 @@ private:
       logger.println("Web server started successfully.");
       coap_server.begin();
       visca.begin();
+      if (otaEnabled) {
+        initOTA();
+      }
     }
   }
 
@@ -116,22 +151,24 @@ private:
       serverActive = false;
       logger.println("Web server stopped.");
       coap_server.end();
+      ArduinoOTA.end();
     }
   }
 
   String get_status() {
     String extra = " ";
     if (espnowEnabled) extra += "ESPNOW ";
+    if (otaEnabled) extra += "OTA ";
     String stationIP = stationEnabled ? (WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "Not connected") : "disabled";
     String stationSSID = String(" SSID: ")+WiFi.SSID() + String(" ")+get_wifi_status();
     String apIP = apEnabled ? WiFi.softAPIP().toString() : "N/A";
-    return String("Station IP: ") + stationIP  + stationSSID + String(" | AP IP: ") + apIP +extra;
+    return String("Station IP: ") + stationIP  + stationSSID + String(" | AP IP: ") + apIP + extra;
   }
 
   void handleRoot() {
     logger.println("Handling root page request...");
     String html;
-    html.reserve(1400);
+    html.reserve(1600);
     html += "<!DOCTYPE html><html><head><title>ESP32 WiFi Config</title>";
     html += "<style>body {font-family: Arial, sans-serif; text-align: center; margin-top: 50px;}";
     html += "form {margin: 20px auto; width: 300px; padding: 20px; border: 1px solid #ccc;}";
@@ -145,7 +182,7 @@ private:
     html += "  var fields = document.getElementById('stationFields');";
     html += "  fields.style.display = checkBox.checked ? 'block' : 'none';";
     html += "}</script></head>";
-    html += "<body><h1>ESP32 WiFi Configuration</h1>";
+    html += "<body><h1>DB3 WiFi Configuration</h1>";
     html += "<h2>";
     html += get_status();
     html += "</h2>";
@@ -160,6 +197,7 @@ private:
     html += "</div>";
     html += "<label><input type='checkbox' name='ap' " + String(apEnabled ? "checked" : "") + "> Access Point Mode (SSID: " + ap_ssid + ", password: " + ap_password + ")</label>";
     html += "<label><input type='checkbox' name='espnow' " + String(espnowEnabled ? "checked" : "") + "> ESPNOW Mode</label>";
+    html += "<label><input type='checkbox' name='ota' " + String(otaEnabled ? "checked" : "") + "> Enable OTA Updates</label>";
     html += "</div>";
     html += "<button type='submit'>Apply Configuration</button></form>";
     html += "</body></html>";
@@ -205,6 +243,7 @@ private:
     bool newStationEnabled = server.hasArg("station");
     bool newAPEnabled = server.hasArg("ap");
     bool newESPNOWEnabled = server.hasArg("espnow");
+    bool newOTAEnabled = server.hasArg("ota");
     String newstation_ssid = server.hasArg("station_ssid") ? server.arg("station_ssid") : "";
     String newstation_password = server.hasArg("station_password") ? server.arg("station_password") : "";
 
@@ -216,6 +255,7 @@ private:
     stationEnabled = newStationEnabled;
     apEnabled = newAPEnabled;
     espnowEnabled = newESPNOWEnabled;
+    otaEnabled = newOTAEnabled;
     if (stationEnabled) {
       station_ssid = newstation_ssid;
       station_password = newstation_password;
@@ -225,7 +265,6 @@ private:
     }
 
     stopServer();
-
     applyConfiguration();
     String response = "<h1>Configuration Applied</h1><p>";
     response += get_status();
@@ -234,8 +273,7 @@ private:
     logger.println("Configuration confirmation page sent to client.");
   }
 
-  String get_wifi_status()
-  {
+  String get_wifi_status() {
     int status = WiFi.status();
     switch (status) {
       case WL_CONNECTED:
@@ -292,12 +330,11 @@ private:
           logger.printf("\nUnknown WiFi status: %d ", status);
           break;
       }
-      unsigned long wait_time=millis() - startTime;
-      if ( wait_time>= timeoutMs) {
+      unsigned long wait_time = millis() - startTime;
+      if (wait_time >= timeoutMs) {
         logger.printf("\nWiFi connection timed out after %ld millis", wait_time);
         return false;
-      }
-      else{
+      } else {
         logger.printf("\nWaiting for WiFi connection, already waited %ld millis", wait_time);
         printDiagToSerial();
       }
@@ -306,103 +343,88 @@ private:
     }
   }
 
-  
-
-
   void register_mdns() {
-    String hostname =  getUniqueName();
+    String hostname = getUniqueName();
     logger.printf("Setting up mDNS with hostname: %s\n", hostname.c_str());
     if (MDNS.begin(hostname.c_str())) {
       logger.printf("mDNS started successfully: %s.local\n", hostname.c_str());
+      if (otaEnabled) {
+        MDNS.addService("http", "tcp", 3232);
+      }
     } else {
       logger.println("Failed to start mDNS");
     }
   }
 
-
-
-
-  wifi_mode_t get_mode(){
-    wifi_mode_t mode=WIFI_STA;
-    if (espnowEnabled){
-      // needs AP mode to keep radios powered.
-      if (stationEnabled){
+  wifi_mode_t get_mode() {
+    wifi_mode_t mode = WIFI_STA;
+    if (espnowEnabled) {
+      if (stationEnabled) {
         mode = WIFI_AP_STA;
-      }
-      else{
+      } else {
         mode = WIFI_AP; 
       }
-    }
-    else {
-      if (stationEnabled && apEnabled){
+    } else {
+      if (stationEnabled && apEnabled) {
         mode = WIFI_AP_STA;
-      }
-      else if (stationEnabled){
+      } else if (stationEnabled) {
         mode = WIFI_STA;
-      }
-      else {
+      } else {
         mode = WIFI_AP;
       }
     }
     return mode;
   }
-  void applyFailSafeConfiguration(){
-    logger.println("Applying failsafe configuration...");
-    espnowActive=false;
-    WiFi.disconnect();
 
-    // Reconfigure WiFi
+  void applyFailSafeConfiguration() {
+    logger.println("Applying failsafe configuration...");
+    espnowActive = false;
+    WiFi.disconnect();
     WiFi.mode(WIFI_AP);
     
     if (WiFi.softAP(ap_ssid.c_str(), ap_password.c_str())) {
-      logger.printf("\nAP started with SSID %s and password %s", WiFi.softAPSSID().c_str(),ap_password.c_str());
+      logger.printf("\nAP started with SSID %s and password %s", WiFi.softAPSSID().c_str(), ap_password.c_str());
       logger.printf("\nAP IP: %s", WiFi.softAPIP().toString().c_str());
-    } 
-    else 
-    {
+    } else {
       logger.printf("\nAP failed to start, probable fallback to open network with SSID %s\n", WiFi.softAPSSID().c_str());
     }
 
     initESPNOW();
-
     startServer();
-
   }
+
   void applyConfiguration() {
     logger.println("Applying configuration...");
-    espnowActive=false;
+    espnowActive = false;
     WiFi.disconnect();
 
-    // Reconfigure WiFi
     WiFi.mode(get_mode());
-    if (stationEnabled){
-      String ssid=station_ssid;
-      String password=station_password;
-      logger.printf("Attempting to connect to access point %s\n", ssid.c_str(), password.c_str());
+    if (stationEnabled) {
+      String ssid = station_ssid;
+      String password = station_password;
+      logger.printf("Attempting to connect to access point %s\n", ssid.c_str());
       WiFi.begin(ssid.c_str(), password.c_str());
       if (initiate_station_wifi()) {
         logger.printf("Connected to WiFi access point %s with IP: %s\n", station_ssid.c_str(), WiFi.localIP().toString().c_str());
       } else {
         logger.println("Failed to connect to WiFi, falling back to AP mode...");
-        stationEnabled=false;
-        apEnabled=true; //make sure we can always reconfigure via AP mode
+        stationEnabled = false;
+        apEnabled = true;
         WiFi.disconnect();
         WiFi.mode(get_mode());
       }
     }
 
-    if (apEnabled){
+    if (apEnabled) {
       if (WiFi.softAP(ap_ssid.c_str(), ap_password.c_str())) {
-        logger.printf("\nAP started with SSID %s and password %s", WiFi.softAPSSID().c_str(),ap_password.c_str());
+        logger.printf("\nAP started with SSID %s and password %s", WiFi.softAPSSID().c_str(), ap_password.c_str());
         logger.printf("\nAP IP: %s", WiFi.softAPIP().toString().c_str());
-      } 
-      else 
-      {
+      } else {
         logger.printf("\nAP failed to start, probable fallback to open network with SSID %s\n", WiFi.softAPSSID().c_str());
       }
     }
 
-    if (espnowEnabled){
+    if (espnowEnabled) {
       initESPNOW();
     }
 
@@ -412,13 +434,14 @@ private:
 
 public:
   WiFiConfigManager(esp_now_recv_cb_t receiveCb, esp_now_send_cb_t sendCb, Logger& log, UDPViscaHandler& visca_handler)
-    : server(80), station_ssid(""), station_password(""), stationEnabled(false), apEnabled(true), espnowEnabled(false),espnowActive(false),
-      serverActive(false), receiveCallback(receiveCb), sentCallback(sendCb), logger(log),
+    : server(80), station_ssid(""), station_password(""), stationEnabled(false), apEnabled(true), 
+      espnowEnabled(false), espnowActive(false), serverActive(false), otaEnabled(false),
+      receiveCallback(receiveCb), sentCallback(sendCb), logger(log),
       coap_server(log), visca(visca_handler), config_applied(false), loop_counter(0) {
-        ap_ssid=getUniqueName();
+    ap_ssid = getUniqueName();
   }
 
-  bool is_espnow_active(){
+  bool is_espnow_active() {
     return espnowActive;
   }
 
@@ -427,19 +450,19 @@ public:
     applyFailSafeConfiguration();
   }
 
-  void printDiagToSerial(){
-      // Do not keep the following line in production builds because it will leak the SSID password
-      //WiFi.printDiag(Serial);
+  void printDiagToSerial() {
+    // Do not keep the following line in production builds because it will leak the SSID password
+    //WiFi.printDiag(Serial);
   }
 
   bool loop() {
-    if (loop_counter%1000==0){
+    if (loop_counter % 1000 == 0) {
       logger.println(get_status().c_str());  
       printDiagToSerial();
     }
-    loop_counter+=1;
+    loop_counter += 1;
 
-    if (!config_applied && loop_counter>1000){
+    if (!config_applied && loop_counter > 1000) {
       logger.println("Start restoring WiFi config...");
       applyConfiguration();
 
@@ -450,11 +473,14 @@ public:
         server.on("/logs", [this]() { handleLogs(); });
         server.on("/status", [this]() { handleStatus(); });
       }
-      config_applied=true;
+      config_applied = true;
     }
     if (serverActive) {
       server.handleClient();
       coap_server.loop();
+      if (otaEnabled) {
+        ArduinoOTA.handle();
+      }
       return visca.processPackets();
     }
     return false;
