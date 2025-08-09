@@ -9,8 +9,6 @@
 #include <esp_now.h>
 #include "coap_server.h"
 
-
-
 class WiFiConfigManager {
 private:
   enum class Mode { Station, AP, ESPNOW };
@@ -18,12 +16,17 @@ private:
   CoapServer coap_server;
   UDPViscaHandler& visca;
   Preferences preferences;
-  String ssid;
-  String password;
-  const String default_ap_password = String("arduino1"); //needs to be minimum 8 chars, otherwise a default ESP_XXXX AP will be used without password
-
-  Mode currentMode;
+  String station_ssid;
+  String station_password;
+  const String ap_password = String("arduino1");
+  String ap_ssid;
+  bool stationEnabled;
+  bool apEnabled;
+  bool espnowEnabled;
+  bool espnowActive;
   bool serverActive;
+  bool config_applied;
+  unsigned long loop_counter;
   esp_now_recv_cb_t receiveCallback;
   esp_now_send_cb_t sentCallback;
   Logger& logger;
@@ -36,51 +39,44 @@ private:
     return String("DB_") + String(macStr);
   }
 
-  // Save settings to NVRAM
   void saveSettings() {
-    logger.println("Saving Wifi settings to NVRAM...");
+    logger.println("Saving WiFi settings to NVRAM...");
     preferences.begin("wifi-config", false);
-    preferences.putInt("mode", static_cast<int>(currentMode));
-    if (currentMode == Mode::Station) {
-      preferences.putString("ssid", ssid);
-      preferences.putString("password", password);
-    }else{
-      // Dont leak passwords in NVRAM
-      preferences.putString("ssid", "");
-      preferences.putString("password", "");  
+    preferences.putBool("stationEnabled", stationEnabled);
+    preferences.putBool("apEnabled", apEnabled);
+    preferences.putBool("espnowEnabled", espnowEnabled);
+    if (stationEnabled) {
+      preferences.putString("station_ssid", station_ssid);
+      preferences.putString("station_password", station_password);
+    } else {
+      preferences.putString("station_ssid", "");
+      preferences.putString("station_password", "");
     }
     preferences.end();
-    logger.println("Wifi settings saved.");
+    logger.println("WiFi settings saved.");
   }
 
-  void set_default_ap_settings(){
-    ssid = getUniqueName();
-    password = default_ap_password;
-  }
-
-  // Load settings from NVRAM
   void loadSettings() {
-    logger.println("Loading Wifi settings from NVRAM...");
+    logger.println("Loading WiFi settings from NVRAM...");
     preferences.begin("wifi-config", true);
-    currentMode = static_cast<Mode>(preferences.getInt("mode", static_cast<int>(Mode::AP))); // Default to AP
-    if (currentMode == Mode::Station) {
-      ssid = preferences.getString("ssid", "");
-      password = preferences.getString("password", "");
-    }
+    stationEnabled = preferences.getBool("stationEnabled", false);
+    apEnabled = preferences.getBool("apEnabled", true); // Default to AP for fallback
+    espnowEnabled = preferences.getBool("espnowEnabled", false);
+    if (stationEnabled) {
+      station_ssid = preferences.getString("station_ssid", "");
+      station_password = preferences.getString("station_password", "");
+    } 
     preferences.end();
-    if (currentMode==Mode::Station){
-      logger.printf("Settings loaded: Station mode connected to SSID %s\n", ssid.c_str());   
+    if (!stationEnabled && !apEnabled && !espnowEnabled) {
+      logger.println("No modes enabled, falling back to AP mode");
+      apEnabled = true;
+      saveSettings();
     }
-    else if (currentMode==Mode::AP){
-      set_default_ap_settings();
-      logger.printf("Settings loaded: Hosting Access Point with SSID %s and password %s\n", ssid.c_str(), password.c_str()); 
-    }
-    else{
-      logger.println("Settings loaded: ESPNOW only mode, settings reset needed to enable Wifi again");
-    }
+    String status = get_status();
+    logger.printf("Settings loaded:  %s\n", status.c_str());
   }
 
-  // Initialize ESP-NOW
+
   void initESPNOW() {
     logger.println("Initializing ESP-NOW...");
     if (esp_now_init() == ESP_OK) {
@@ -91,17 +87,18 @@ private:
       if (sentCallback) {
         esp_now_register_send_cb(sentCallback);
       }
+      espnowActive=true;
     } else {
-      logger.println("ESPNow Init Failed");
-      delay(3000);
-      ESP.restart();
+      logger.println("ESPNow Init Failed, falling back to AP only mode...");
+      apEnabled = true;
+      stationEnabled = false;
+      espnowEnabled = false;
     }
   }
 
-  // Start the web server
   void startServer() {
     if (!serverActive) {
-      register_mdns(); 
+      register_mdns();
       logger.println("Starting web server...");
       server.begin();
       serverActive = true;
@@ -111,7 +108,6 @@ private:
     }
   }
 
-  // Stop the web server
   void stopServer() {
     if (serverActive) {
       logger.println("Stopping web server...");
@@ -123,54 +119,56 @@ private:
     }
   }
 
-  // Get status as a string
   String get_status() {
-    String modeStr = currentMode == Mode::Station ? String("Station") : currentMode == Mode::AP ? String("AP") : String("ESPNOW Only");
-    String ipStr = currentMode == Mode::AP ? WiFi.softAPIP().toString() : currentMode == Mode::Station && WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : String("Not connected");
-    return String("Status: ") + modeStr + String(" | IP: ") + ipStr;
+    String extra = " ";
+    if (espnowEnabled) extra += "ESPNOW ";
+    String stationIP = stationEnabled ? (WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "Not connected") : "disabled";
+    String stationSSID = String(" SSID: ")+WiFi.SSID() + String(" ")+get_wifi_status();
+    String apIP = apEnabled ? WiFi.softAPIP().toString() : "N/A";
+    return String("Station IP: ") + stationIP  + stationSSID + String(" | AP IP: ") + apIP +extra;
   }
 
-  // Handle root page request
   void handleRoot() {
-    logger.println(String("Handling root page request..."));
+    logger.println("Handling root page request...");
     String html;
-    html.reserve(1200);
+    html.reserve(1400);
     html += "<!DOCTYPE html><html><head><title>ESP32 WiFi Config</title>";
     html += "<style>body {font-family: Arial, sans-serif; text-align: center; margin-top: 50px;}";
     html += "form {margin: 20px auto; width: 300px; padding: 20px; border: 1px solid #ccc;}";
-    html += "input, button {margin: 10px; padding: 5px; width: 200px;}";
-    html += "button {background-color: #4CAF50; color: white; border: none; cursor: pointer;}";
-    html += "a {margin: 10px;}</style>";
-    html += "</head><body><h1>ESP32 WiFi Configuration</h1>";
-    html += "<h2>Current Mode: ";
-    html += currentMode == Mode::Station ? String("Station + ESPNOW") : currentMode == Mode::AP ? String("Access Point + ESPNOW") : String("ESPNOW Only");
+    html += "input, button {margin: 10px; padding: 5px;}";
+    html += "button {background-color: #4CAF50; color: white; border: none; cursor: pointer; width: 200px;}";
+    html += "a {margin: 10px;} label {display: block; text-align: left;}";
+    html += "#stationFields {display: none;} .checkbox-container {text-align: left; margin-left: 50px;}";
+    html += "</style><script>";
+    html += "function toggleStationFields() {";
+    html += "  var checkBox = document.getElementById('stationMode');";
+    html += "  var fields = document.getElementById('stationFields');";
+    html += "  fields.style.display = checkBox.checked ? 'block' : 'none';";
+    html += "}</script></head>";
+    html += "<body><h1>ESP32 WiFi Configuration</h1>";
+    html += "<h2>";
+    html += get_status();
     html += "</h2>";
     html += "<p><a href='/logs'>View Logs</a> | <a href='/status'>View Status</a></p>";
-    html += "<form action='/connect' method='POST'>";
-    html += "<h3>Connect to WiFi</h3>";
-    html += "SSID: <input type='text' name='ssid'><br>";
-    html += "Password: <input type='password' name='password'><br>";
-    html += "<button type='submit'>Connect</button></form>";
-    html += "<form action='/ap' method='POST'>";
-    html += "<h3>Use as Access Point</h3>";
-    html += "SSID: ";
-    html += ssid;
-    html += "<br>";
-    html += "Password: ";
-    html += default_ap_password;
-    html += "<br>";
-    html += "<button type='submit'>Set as AP</button></form>";
-    html += "<form action='/espnow' method='POST'>";
-    html += "<h3>Use ESPNOW Only</h3>";
-    html += "<button type='submit'>Set as ESPNOW Only</button></form>";
+    html += "<form action='/configure' method='POST'>";
+    html += "<h3>Configure WiFi Modes</h3>";
+    html += "<div class='checkbox-container'>";
+    html += "<label><input type='checkbox' name='station' id='stationMode' " + String(stationEnabled ? "checked" : "") + " onchange='toggleStationFields()'> Station Mode</label>";
+    html += "<div id='stationFields' " + String(stationEnabled ? "style='display:block;'" : "") + ">";
+    html += "SSID: <input type='text' name='station_ssid' value='" + station_ssid + "'><br>";
+    html += "password: <input type='password' name='station_password' value='" + station_password + "'><br>";
+    html += "</div>";
+    html += "<label><input type='checkbox' name='ap' " + String(apEnabled ? "checked" : "") + "> Access Point Mode (SSID: " + ap_ssid + ", password: " + ap_password + ")</label>";
+    html += "<label><input type='checkbox' name='espnow' " + String(espnowEnabled ? "checked" : "") + "> ESPNOW Mode</label>";
+    html += "</div>";
+    html += "<button type='submit'>Apply Configuration</button></form>";
     html += "</body></html>";
     server.send(200, "text/html", html);
     logger.printf("Default page sent to client. %d bytes\n", html.length());
   }
 
-  // Handle logs page request
   void handleLogs() {
-    logger.println(String("Handling logs page request..."));
+    logger.println("Handling logs page request...");
     String html;
     html.reserve(1024);
     html += "<!DOCTYPE html><html><head><title>ESP32 Logs</title>";
@@ -186,11 +184,10 @@ private:
     logger.printf("Log page sent to client. %d bytes\n", html.length());
   }
 
-  // Handle status page request
   void handleStatus() {
-    logger.println(String("Handling status page request..."));
+    logger.println("Handling status page request...");
     String html;
-    html.reserve(512); 
+    html.reserve(512);
     html += "<!DOCTYPE html><html><head><title>ESP32 Status</title>";
     html += "<style>body {font-family: Arial, sans-serif; text-align: center; margin-top: 50px;}</style>";
     html += "</head><body><h1>ESP32 Status</h1>";
@@ -203,74 +200,81 @@ private:
     logger.printf("Status page sent to client. %d bytes\n", html.length());
   }
 
-  // Handle WiFi connection request
-  void handleConnect() {
-    logger.println("Handling WiFi connection request...");
-    if (server.hasArg("ssid") && server.hasArg("password")) {
-      String newSSID = server.arg("ssid");
-      String newPassword = server.arg("password");
-      switchToStationMode(newSSID, newPassword);
-      if (WiFi.status() == WL_CONNECTED) {
-        server.send(200, "text/html", String("<h1>Connected to ") + newSSID + String("</h1><p>IP: ") + WiFi.localIP().toString() + String("</p><a href='/'>Back</a>"));
-        logger.println("Connection success page sent to client.");
-      } else {
-        logger.println("Failed to connect to WiFi.");
-        server.send(200, "text/html", String("<h1>Connection Failed</h1><p>Check credentials and try again.</p><a href='/'>Back</a>"));
-        logger.println("Connection failure page sent to client.");
-      }
-    } else {
-      logger.println("Bad request: Missing SSID or password.");
-      server.send(400, "text/html", String("<h1>Bad Request</h1><p>Missing SSID or password.</p><a href='/'>Back</a>"));
-      logger.println("Bad request page sent to client.");
+  void handleConfigure() {
+    logger.println("Handling configuration request...");
+    bool newStationEnabled = server.hasArg("station");
+    bool newAPEnabled = server.hasArg("ap");
+    bool newESPNOWEnabled = server.hasArg("espnow");
+    String newstation_ssid = server.hasArg("station_ssid") ? server.arg("station_ssid") : "";
+    String newstation_password = server.hasArg("station_password") ? server.arg("station_password") : "";
+
+    if (!newStationEnabled && !newAPEnabled && !newESPNOWEnabled) {
+      logger.println("No modes selected, falling back to AP mode...");
+      newAPEnabled = true;
     }
+
+    stationEnabled = newStationEnabled;
+    apEnabled = newAPEnabled;
+    espnowEnabled = newESPNOWEnabled;
+    if (stationEnabled) {
+      station_ssid = newstation_ssid;
+      station_password = newstation_password;
+    } else {
+      station_ssid = "";
+      station_password = "";
+    }
+
+    stopServer();
+
+    applyConfiguration();
+    String response = "<h1>Configuration Applied</h1><p>";
+    response += get_status();
+    response += "</p><a href='/'>Back</a>";
+    server.send(200, "text/html", response);
+    logger.println("Configuration confirmation page sent to client.");
   }
 
-  // Handle AP mode request
-  void handleAP() {
-    logger.println("Handling AP mode request...");
-    switchToAPMode();
-    server.send(200, "text/html", String("<h1>Access Point Started</h1><p>SSID: ") + ssid + String("<br>Password: ")+default_ap_password+String("<br>IP: ") + WiFi.softAPIP().toString() + String("<br>URL: http://") + ssid + String(".local</p><a href='/'>Back</a>"));
-    logger.println("AP mode confirmation page sent to client.");
+  String get_wifi_status()
+  {
+    int status = WiFi.status();
+    switch (status) {
+      case WL_CONNECTED:
+        return String("WiFi successfully connected");
+      case WL_NO_SSID_AVAIL:
+        return String("SSID not found");
+      case WL_CONNECT_FAILED:
+        return String("Connection failed (e.g., wrong station_password)");
+      case WL_NO_SHIELD:
+        return String("No WiFi hardware detected");
+      case WL_IDLE_STATUS:
+        return String("WiFi idle");
+      case WL_DISCONNECTED:
+        return String("WiFi disconnected");
+      case WL_SCAN_COMPLETED:
+        return String("WiFi scan completed");
+      default:      
+        break;
+    }  
+    return String("Unknown WiFi status");
   }
 
-  // Handle ESPNOW mode request
-  void handleESPNOW() {
-    logger.println("Handling ESPNOW only mode request...");
-    switchToESPNOWMode();
-    server.send(200, "text/html", String("<h1>ESPNOW Only Mode Activated</h1><p>Web server will stop. Reset device to access this page again.</p>"));
-    logger.println("ESPNOW mode confirmation page sent to client.");
-    stopServer(); // Stop server after sending response
-  }
-
-public:
-  WiFiConfigManager(esp_now_recv_cb_t receiveCb, esp_now_send_cb_t sendCb, Logger& log, UDPViscaHandler& visca_handler)
-    : server(80), ssid(""), password(""), currentMode(Mode::AP), serverActive(false),
-      receiveCallback(receiveCb), sentCallback(sendCb), logger(log), coap_server(log), visca(visca_handler) {
-  
-  }
-
-  bool initiate_wifi(unsigned long timeoutMs = 20000){
+  bool initiate_station_wifi(unsigned long timeoutMs = 20000) {
     unsigned long startTime = millis();
-
     while (true) {
       int status = WiFi.status();
       switch (status) {
         case WL_CONNECTED:
           logger.printf("\nWiFi successfully connected");
           return true;
-
         case WL_NO_SSID_AVAIL:
-          logger.printf("\nSSID not found");
+          logger.printf("\nstation_ssid not found");
           return false;
-
         case WL_CONNECT_FAILED:
-          logger.printf("\nConnection failed (e.g., wrong password)");
+          logger.printf("\nConnection failed (e.g., wrong station_password)");
           return false;
-
         case WL_NO_SHIELD:
           logger.printf("\nNo WiFi hardware detected");
           return false;
-
         case WL_IDLE_STATUS:
           logger.printf("\nWiFi idle");
           break;
@@ -280,51 +284,25 @@ public:
         case WL_SCAN_COMPLETED:
           logger.printf("\nWiFi scan completed");
           break;
-
         default:
           logger.printf("\nUnknown WiFi status: %d ", status);
           break;
       }
-
-      if (millis() - startTime >= timeoutMs) {
-        logger.printf("\nWiFi connection timed out");
+      unsigned long wait_time=millis() - startTime;
+      if ( wait_time>= timeoutMs) {
+        logger.printf("\nWiFi connection timed out after %ld millis", wait_time);
         return false;
       }
-
       delay(500);
       logger.print("...");
     }
   }
 
-  void start_station_mode(){
-    WiFi.mode(WIFI_STA);
-    logger.printf("Attempting to connect to SSID: %s\n", ssid);
-    WiFi.begin(ssid.c_str(), password.c_str());
-    initiate_wifi();
-    if (WiFi.status() == WL_CONNECTED) {
-      logger.printf("Connected to WiFi. IP: {%s}\n", WiFi.localIP().toString().c_str());
-      initESPNOW();
-      startServer();
-    } else {
-      logger.println("Failed to connect to WiFi. Falling back to AP mode...");
-      set_default_ap_settings();
-      switchToAPMode();
-    }
-  }
+  
 
-  // Switch to Station mode programmatically
-  void switchToStationMode(String newSSID, String newPassword) {
-    logger.println("Switching to Station mode...");
-    currentMode = Mode::Station;
-    ssid = newSSID;
-    password = newPassword;
-    WiFi.disconnect();
-    start_station_mode();
-    saveSettings();
-  }
 
-  void register_mdns(){
-    String hostname = ssid;
+  void register_mdns() {
+    String hostname =  getUniqueName();
     logger.printf("Setting up mDNS with hostname: %s\n", hostname.c_str());
     if (MDNS.begin(hostname.c_str())) {
       logger.printf("mDNS started successfully: %s.local\n", hostname.c_str());
@@ -333,86 +311,116 @@ public:
     }
   }
 
-  void start_ap(){
-    WiFi.mode(WIFI_AP_STA); // Use AP_STA for ESP-NOW compatibility
-    logger.printf("Starting AP with SSID: %s PW:%s\n", ssid, password);
-    String hostname = ssid;
-    if (WiFi.softAP(ssid.c_str(), password.c_str()))
-    {
-      logger.printf("AP started with SSID %s\n",WiFi.softAPSSID().c_str());
-      logger.printf("AP IP: %s\n", WiFi.softAPIP().toString().c_str());
-      logger.printf("AP URL: http://%s.local\n", hostname.c_str());
+
+
+
+  wifi_mode_t get_mode(){
+    wifi_mode_t mode=WIFI_STA;
+    if (espnowEnabled){
+      // needs AP mode to keep radios powered.
+      if (stationEnabled){
+        mode = WIFI_AP_STA;
+      }
+      else{
+        mode = WIFI_AP; 
+      }
     }
-    else{
-      logger.printf("AP failed to start, probable fallback to open network with SSID %s\n",WiFi.softAPSSID().c_str());
+    else {
+      if (stationEnabled && apEnabled){
+        mode = WIFI_AP_STA;
+      }
+      else if (stationEnabled){
+        mode = WIFI_STA;
+      }
+      else {
+        mode = WIFI_AP;
+      }
+    }
+    return mode;
+  }
+  void applyConfiguration() {
+    logger.println("Applying configuration...");
+    espnowActive=false;
+    WiFi.disconnect();
+
+    // Reconfigure WiFi
+    WiFi.mode(get_mode());
+    if (stationEnabled){
+      logger.printf("Attempting to connect to access point %s\n", station_ssid.c_str());
+      WiFi.begin(station_ssid.c_str(), station_password.c_str());
+      if (initiate_station_wifi()) {
+        logger.printf("Connected to WiFi access point %s with IP: %s\n", station_ssid.c_str(), WiFi.localIP().toString().c_str());
+      } else {
+        logger.println("Failed to connect to WiFi, falling back to AP mode...");
+        stationEnabled=false;
+        apEnabled=true; //make sure we can always reconfigure via AP mode
+        WiFi.disconnect();
+        WiFi.mode(get_mode());
+      }
     }
 
-    initESPNOW();
+    if (apEnabled){
+      if (WiFi.softAP(ap_ssid.c_str(), ap_password.c_str())) {
+        logger.printf("\nAP started with SSID %s and password %s", WiFi.softAPSSID().c_str(),ap_password.c_str());
+        logger.printf("\nAP IP: %s", WiFi.softAPIP().toString().c_str());
+      } 
+      else 
+      {
+        logger.printf("\nAP failed to start, probable fallback to open network with SSID %s\n", WiFi.softAPSSID().c_str());
+      }
+    }
 
+    if (espnowEnabled){
+      initESPNOW();
+    }
+
+    saveSettings();
     startServer();
   }
 
-  // Switch to AP mode programmatically
-  void switchToAPMode() {
-    logger.println("Switching to AP mode...");
-    currentMode = Mode::AP;
-    WiFi.disconnect();
-    start_ap();      
-    saveSettings();
+public:
+  WiFiConfigManager(esp_now_recv_cb_t receiveCb, esp_now_send_cb_t sendCb, Logger& log, UDPViscaHandler& visca_handler)
+    : server(80), station_ssid(""), station_password(""), stationEnabled(false), apEnabled(true), espnowEnabled(false),espnowActive(false),
+      serverActive(false), receiveCallback(receiveCb), sentCallback(sendCb), logger(log),
+      coap_server(log), visca(visca_handler), config_applied(false), loop_counter(0) {
+        ap_ssid=getUniqueName();
   }
 
-  void start_espnow_mode(){
-    WiFi.mode(WIFI_STA);
-    logger.println("WiFi mode set to Station (ESPNOW only, Wifi disconnected).");
-    WiFi.disconnect();
-    initESPNOW();
-    stopServer();
-    WiFi.disconnect();
-  }
-
-  // Switch to ESPNOW only mode programmatically
-  void switchToESPNOWMode() {
-    logger.println("Switching to ESPNOW only mode...");
-    currentMode = Mode::ESPNOW;
-    start_espnow_mode();
-    saveSettings();
+  bool is_espnow_active(){
+    return espnowActive;
   }
 
   void setup() {
-    logger.println("Starting ESP32 WiFi Configuration...");
-    set_default_ap_settings();
-    //loadSettings();
-
-    String hostname = ssid;
-    
-    if (currentMode == Mode::AP) {
-      start_ap();
-
-    } else if (currentMode == Mode::Station) {
-      start_station_mode();
-    } else { // ESPNOW mode
-      start_espnow_mode();
-    }
-
-    // Define server routes
-    if (serverActive) {
-      logger.println("Configuring server routes...");
-      server.on("/", [this]() { handleRoot(); });
-      server.on("/connect", HTTP_POST, [this]() { handleConnect(); });
-      server.on("/ap", HTTP_POST, [this]() { handleAP(); });
-      server.on("/espnow", HTTP_POST, [this]() { handleESPNOW(); });
-      server.on("/logs", [this]() { handleLogs(); });
-      server.on("/status", [this]() { handleStatus(); });
-    }
+    loadSettings();
+    applyConfiguration();
   }
 
   bool loop() {
+    if (loop_counter%10000==0){
+      logger.println(get_status().c_str());  
+      WiFi.printDiag(Serial);
+    }
+    loop_counter+=1;
+
+    if (!config_applied){
+      logger.println("Starting ESP32 WiFi Configuration...");
+      applyConfiguration();
+
+      if (serverActive) {
+        logger.println("Configuring server routes...");
+        server.on("/", [this]() { handleRoot(); });
+        server.on("/configure", HTTP_POST, [this]() { handleConfigure(); });
+        server.on("/logs", [this]() { handleLogs(); });
+        server.on("/status", [this]() { handleStatus(); });
+      }
+      config_applied=true;
+    }
     if (serverActive) {
       server.handleClient();
       coap_server.loop();
       return visca.processPackets();
     }
-    return false;    
+    return false;
   }
 };
 

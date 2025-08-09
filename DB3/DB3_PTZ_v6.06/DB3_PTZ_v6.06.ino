@@ -2576,6 +2576,9 @@ void broadcast(const String & message)
 }
 
 void SendNextionValues() {
+  if (!wifiManager.is_espnow_active()){
+    return;
+  }
   broadcast ("");
   NextionValues.Snd = 3;                    //Tells the controller who sent the message 1=Controller 2=Slider 3=PanTilt 4=Turntable 5=Jib
   //NextionValues.Ez = ease_InOut;            // Acceloration control
