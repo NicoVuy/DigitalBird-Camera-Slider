@@ -258,23 +258,24 @@ private:
     return String("Unknown WiFi status");
   }
 
-  bool initiate_station_wifi(unsigned long timeoutMs = 20000) {
+  bool initiate_station_wifi(unsigned long timeoutMs = 60000) {
     unsigned long startTime = millis();
     while (true) {
       int status = WiFi.status();
+
       switch (status) {
         case WL_CONNECTED:
           logger.printf("\nWiFi successfully connected");
           return true;
         case WL_NO_SSID_AVAIL:
-          logger.printf("\nstation_ssid not found");
-          return false;
+          logger.printf("\nSSID not found");
+          break;
         case WL_CONNECT_FAILED:
           logger.printf("\nConnection failed (e.g., wrong station_password)");
           return false;
         case WL_NO_SHIELD:
           logger.printf("\nNo WiFi hardware detected");
-          return false;
+          break;
         case WL_IDLE_STATUS:
           logger.printf("\nWiFi idle");
           break;
@@ -283,6 +284,9 @@ private:
           break;
         case WL_SCAN_COMPLETED:
           logger.printf("\nWiFi scan completed");
+          break;
+        case WL_CONNECTION_LOST:
+          logger.printf("\nWiFi connection lost");
           break;
         default:
           logger.printf("\nUnknown WiFi status: %d ", status);
@@ -293,8 +297,12 @@ private:
         logger.printf("\nWiFi connection timed out after %ld millis", wait_time);
         return false;
       }
+      else{
+        logger.printf("\nWaiting for WiFi connection, already waited %ld millis", wait_time);
+        printDiagToSerial();
+      }
+
       delay(500);
-      logger.print("...");
     }
   }
 
@@ -338,6 +346,28 @@ private:
     }
     return mode;
   }
+  void applyFailSafeConfiguration(){
+    logger.println("Applying failsafe configuration...");
+    espnowActive=false;
+    WiFi.disconnect();
+
+    // Reconfigure WiFi
+    WiFi.mode(WIFI_AP);
+    
+    if (WiFi.softAP(ap_ssid.c_str(), ap_password.c_str())) {
+      logger.printf("\nAP started with SSID %s and password %s", WiFi.softAPSSID().c_str(),ap_password.c_str());
+      logger.printf("\nAP IP: %s", WiFi.softAPIP().toString().c_str());
+    } 
+    else 
+    {
+      logger.printf("\nAP failed to start, probable fallback to open network with SSID %s\n", WiFi.softAPSSID().c_str());
+    }
+
+    initESPNOW();
+
+    startServer();
+
+  }
   void applyConfiguration() {
     logger.println("Applying configuration...");
     espnowActive=false;
@@ -346,8 +376,10 @@ private:
     // Reconfigure WiFi
     WiFi.mode(get_mode());
     if (stationEnabled){
-      logger.printf("Attempting to connect to access point %s\n", station_ssid.c_str());
-      WiFi.begin(station_ssid.c_str(), station_password.c_str());
+      String ssid=station_ssid;
+      String password=station_password;
+      logger.printf("Attempting to connect to access point %s\n", ssid.c_str(), password.c_str());
+      WiFi.begin(ssid.c_str(), password.c_str());
       if (initiate_station_wifi()) {
         logger.printf("Connected to WiFi access point %s with IP: %s\n", station_ssid.c_str(), WiFi.localIP().toString().c_str());
       } else {
@@ -392,18 +424,23 @@ public:
 
   void setup() {
     loadSettings();
-    applyConfiguration();
+    applyFailSafeConfiguration();
+  }
+
+  void printDiagToSerial(){
+      // Do not keep the following line in production builds because it will leak the SSID password
+      //WiFi.printDiag(Serial);
   }
 
   bool loop() {
-    if (loop_counter%10000==0){
+    if (loop_counter%1000==0){
       logger.println(get_status().c_str());  
-      WiFi.printDiag(Serial);
+      printDiagToSerial();
     }
     loop_counter+=1;
 
-    if (!config_applied){
-      logger.println("Starting ESP32 WiFi Configuration...");
+    if (!config_applied && loop_counter>1000){
+      logger.println("Start restoring WiFi config...");
       applyConfiguration();
 
       if (serverActive) {
